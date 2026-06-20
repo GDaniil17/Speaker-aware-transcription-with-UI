@@ -1,0 +1,26 @@
+# Secrets
+.env
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# Model / data caches
+.cache/
+models/
+hf_cache/
+
+# Generated transcripts
+*.srt
+*.vtt
+out/
+
+# Media copies served to the in-browser preview
+static/
+
+# OS
+.DS_Store

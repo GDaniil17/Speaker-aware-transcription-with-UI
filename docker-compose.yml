@@ -1,0 +1,12 @@
+services:
+  app:
+    build: .
+    ports:
+      - "8501:8501"
+    environment:
+      HF_TOKEN: ${HF_TOKEN:-}
+    volumes:
+      - ./hf_cache:/app/hf_cache
+      - ./data:/data
+    stdin_open: true
+    tty: true

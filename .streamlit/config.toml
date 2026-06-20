@@ -1,0 +1,9 @@
+[server]
+maxUploadSize = 4096
+enableStaticServing = true
+headless = true
+address = "0.0.0.0"
+port = 8501
+
+[browser]
+gatherUsageStats = false
