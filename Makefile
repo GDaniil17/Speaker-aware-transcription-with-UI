@@ -1,5 +1,5 @@
 .DEFAULT_GOAL := help
-.PHONY: help setup run cli test lint format check clean docker-build docker-run docker-up docker-down
+.PHONY: help setup clean-static run cli test lint format check clean docker-build docker-run docker-up docker-down
 
 FILE     ?=
 START    ?= 0
@@ -15,7 +15,10 @@ setup: ## Create venv and install all deps (uv); copies .env from example if mis
 	uv sync
 	@test -f .env || (cp .env.example .env && echo "Created .env — set HF_TOKEN before running.")
 
-run: setup ## Launch the Streamlit UI at http://localhost:8501
+clean-static: ## Remove generated Streamlit preview files
+	rm -f static/preview_*
+
+run: setup clean-static ## Launch the Streamlit UI at http://localhost:8501
 	uv run streamlit run app.py
 
 cli: setup ## Quick fragment test, e.g. make cli FILE=sample-interview.mp3 DURATION=60 MODEL=small
@@ -35,7 +38,7 @@ format: ## Format with ruff
 check: lint test ## Lint + test
 
 clean: ## Remove caches and the virtualenv
-	rm -rf .venv .pytest_cache .ruff_cache **/__pycache__
+	rm -rf .venv .pytest_cache .ruff_cache **/__pycache__ static/preview_*
 
 docker-build: ## Build the Docker image
 	docker compose build

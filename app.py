@@ -11,7 +11,6 @@ import json
 import os
 import shutil
 import tempfile
-from html import escape
 from pathlib import Path
 
 import streamlit as st
@@ -31,8 +30,20 @@ from speaker_transcribe.config import (
     is_english_only_model,
     mlx_available,
 )
-from speaker_transcribe.export import EXPORTERS, export
 from speaker_transcribe.pipeline import TranscriptSegment, run_pipeline
+
+STATIC_DIR = Path(__file__).resolve().parent / "static"
+
+
+def _clear_static_previews() -> None:
+    """Remove generated media previews from previous runs."""
+    if not STATIC_DIR.is_dir():
+        return
+    for preview in STATIC_DIR.glob("preview_*"):
+        preview.unlink(missing_ok=True)
+
+
+_clear_static_previews()
 
 st.set_page_config(page_title="Speaker Transcribe", page_icon="🎙️", layout="wide")
 st.title("🎙️ Speaker-aware transcription")
@@ -90,8 +101,7 @@ _MIME_BY_EXT = {
 }
 
 MAX_INLINE_BYTES = 150 * 1024 * 1024
-
-STATIC_DIR = Path(__file__).resolve().parent / "static"
+MAX_STATIC_PREVIEW_BYTES = 950 * 1024 * 1024
 
 
 def media_meta(name: str) -> tuple[str, bool]:
@@ -158,8 +168,8 @@ def _static_media_url(info: tuple) -> str | None:
                 f"{p.resolve()}:{stt.st_size}:{int(stt.st_mtime)}".encode()
             ).hexdigest()[:16]
         target = STATIC_DIR / f"preview_{key}{ext}"
+        _purge_static_previews(keep=target.name)
         if not target.exists():
-            _purge_static_previews(keep=target.name)
             if kind == "bytes":
                 target.write_bytes(payload)
             else:
@@ -247,6 +257,7 @@ _PLAYER_JS = r"""
     return pad(h, 2) + ':' + pad(m, 2) + ':' + pad(s, 2) + sep + pad(ms, 3);
   }
   function seek(t) {
+    if (!player) return;
     player.currentTime = t;
     const p = player.play();
     if (p && p.catch) p.catch(() => {});
@@ -308,6 +319,8 @@ _PLAYER_JS = r"""
       const o = document.createElement('option');
       o.value = sp.key;
       o.textContent = sp.name;
+      o.style.background = sp.color;
+      o.style.color = '#ffffff';
       sel.appendChild(o);
     });
     const nw = document.createElement('option');
@@ -324,6 +337,7 @@ _PLAYER_JS = r"""
         return;
       }
       seg.spk = sel.value;
+      sel.style.background = getSpk(seg.spk).color;
       renderTranscript();
     });
     return sel;
@@ -343,6 +357,11 @@ _PLAYER_JS = r"""
       const tx = document.createElement('span');
       tx.className = 'tx';
       tx.textContent = seg.text;
+      tx.contentEditable = 'true';
+      tx.spellcheck = true;
+      tx.addEventListener('input', () => {
+        seg.text = tx.textContent || '';
+      });
       row.appendChild(ts);
       row.appendChild(makeSelect(seg));
       row.appendChild(tx);
@@ -363,6 +382,7 @@ _PLAYER_JS = r"""
     return idx;
   }
   function sync(scroll) {
+    if (!player) return;
     const idx = currentIndex(player.currentTime);
     if (idx !== activeIdx) {
       if (rows[activeIdx]) rows[activeIdx].classList.remove('active');
@@ -377,10 +397,12 @@ _PLAYER_JS = r"""
       caption.innerHTML = seg ? '<span>' + seg.text.replace(/</g, '&lt;') + '</span>' : '';
     }
   }
-  player.addEventListener('timeupdate', () => sync(true));
-  ['seeked', 'play', 'pause', 'loadedmetadata'].forEach(
-    (ev) => player.addEventListener(ev, () => sync(false))
-  );
+  if (player) {
+    player.addEventListener('timeupdate', () => sync(true));
+    ['seeked', 'play', 'pause', 'loadedmetadata'].forEach(
+      (ev) => player.addEventListener(ev, () => sync(false))
+    );
+  }
 
   function withSpk() { return document.getElementById('ex_spk').checked; }
   function toTxt() {
@@ -440,7 +462,7 @@ _PLAYER_JS = r"""
 """
 
 
-def _player_html(src: str, is_video: bool, segments: list[TranscriptSegment]) -> str:
+def _player_html(src: str | None, is_video: bool, segments: list[TranscriptSegment]) -> str:
     """Self-contained HTML: media player + an editable, clickable transcript.
 
     `src` is a `data:` URI (inlined) or an `app/static/...` URL. Editing and
@@ -464,14 +486,18 @@ def _player_html(src: str, is_video: bool, segments: list[TranscriptSegment]) ->
         for i, spk in enumerate(order)
     ]
 
-    tag = "video" if is_video else "audio"
-    extra = "max-height:55vh;background:#000;" if is_video else ""
-    style = "width:100%;border-radius:8px;" + extra
-    media_el = (
-        f'<{tag} id="player" src="{src}" controls preload="metadata" '
-        f'style="{style}"></{tag}>'
-    )
-    overlay = '<div id="caption"></div>' if is_video else ""
+    if src:
+        tag = "video" if is_video else "audio"
+        extra = "max-height:55vh;background:#000;" if is_video else ""
+        style = "width:100%;border-radius:8px;" + extra
+        media_el = (
+            f'<{tag} id="player" src="{src}" controls preload="metadata" '
+            f'style="{style}"></{tag}>'
+        )
+        overlay = '<div id="caption"></div>' if is_video else ""
+        stage = f'<div id="stage">{media_el}{overlay}</div>'
+    else:
+        stage = ""
 
     data_js = (
         f"const SEGS = {json.dumps(seg_data, ensure_ascii=False)};\n"
@@ -482,7 +508,7 @@ def _player_html(src: str, is_video: bool, segments: list[TranscriptSegment]) ->
         "<!doctype html><html><head><meta charset=\"utf-8\"><style>"
         + _PLAYER_CSS
         + "</style></head><body>"
-        + f'<div id="stage">{media_el}{overlay}</div>'
+        + stage
         + '<div id="speakers"></div><div id="transcript"></div>'
         + '<div id="exports">'
         + '<label title="Include speaker names in the downloaded file">'
@@ -806,48 +832,6 @@ with tab_path:
 run = st.button("▶️ Transcribe", type="primary", disabled=input_path is None)
 
 
-def _speaker_settings(segments: list[TranscriptSegment]) -> tuple[dict[str, str], dict[str, str]]:
-    """Per-speaker (alias, color) dicts, seeded with defaults in session state."""
-    speakers: list[str] = []
-    for seg in segments:
-        if seg.speaker not in speakers:
-            speakers.append(seg.speaker)
-
-    aliases: dict[str, str] = st.session_state.setdefault("speaker_aliases", {})
-    colors: dict[str, str] = st.session_state.setdefault("speaker_colors", {})
-    for i, spk in enumerate(speakers):
-        aliases.setdefault(spk, spk)
-        colors.setdefault(spk, SPEAKER_PALETTE[i % len(SPEAKER_PALETTE)])
-
-    with st.expander("✏️ Edit speakers", expanded=False):
-        for spk in speakers:
-            c1, c2 = st.columns([4, 1])
-            aliases[spk] = c1.text_input(
-                f"Name for {spk}", value=aliases[spk], key=f"alias_{spk}"
-            ).strip() or spk
-            colors[spk] = c2.color_picker("Color", value=colors[spk], key=f"color_{spk}")
-
-    return aliases, colors
-
-
-def _render_markdown_transcript(
-    segments: list[TranscriptSegment], aliases: dict[str, str], colors: dict[str, str]
-) -> None:
-    """Static transcript fallback when no inline media preview is available."""
-    prev = None
-    body = []
-    for seg in segments:
-        if seg.speaker != prev:
-            name = escape(aliases.get(seg.speaker, seg.speaker))
-            color = colors.get(seg.speaker, "#000000")
-            body.append(f'\n<strong style="color:{color}">{name}</strong>')
-            prev = seg.speaker
-        body.append(
-            f'&nbsp;&nbsp;<code>{format_clock(seg.start)}</code> {escape(seg.text)}'
-        )
-    st.markdown("  \n".join(body), unsafe_allow_html=True)
-
-
 def _player_src(info: tuple) -> str | None:
     """`data:` URI when small enough to inline, else an `app/static/...` URL."""
     _kind, _payload, name, mime, _is_video, size = info
@@ -855,6 +839,8 @@ def _player_src(info: tuple) -> str | None:
         data = _read_media_bytes(info)
         if data is not None:
             return f"data:{mime};base64,{base64.b64encode(data).decode('ascii')}"
+    if size > MAX_STATIC_PREVIEW_BYTES:
+        return None
     return _static_media_url(info)
 
 
@@ -877,27 +863,11 @@ def _render(segments: list[TranscriptSegment]) -> None:
         )
         return
 
-    aliases, colors = _speaker_settings(segments)
-    _render_markdown_transcript(segments, aliases, colors)
-
-    aliased = [
-        TranscriptSegment(seg.start, seg.end, aliases.get(seg.speaker, seg.speaker), seg.text)
-        for seg in segments
-    ]
-
-    st.subheader("Download")
-    include_speakers = st.checkbox(
-        "Include speaker labels", value=True, help="Off = transcript text only."
+    st.caption(
+        "Edit names, colours, speaker assignments, and transcript text. "
+        "Use the buttons below the transcript to download your edited result."
     )
-    cols = st.columns(len(EXPORTERS))
-    for col, fmt in zip(cols, EXPORTERS, strict=False):
-        col.download_button(
-            f".{fmt}",
-            data=export(aliased, fmt, include_speakers),
-            file_name=f"transcript.{fmt}",
-            mime="text/plain",
-            use_container_width=True,
-        )
+    components.html(_player_html(None, False, segments), height=620, scrolling=True)
 
 
 HF_DIARIZATION_MODEL = "pyannote/speaker-diarization-community-1"

@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from speaker_transcribe.audio import prepare_audio
-from speaker_transcribe.config import Settings, mlx_repo_for
+from speaker_transcribe.config import Settings, ensure_whisper_model_downloaded, mlx_repo_for
 
 ProgressFn = Callable[[str], None]
 ProgressBarFn = Callable[[str, float, float | None], None]
@@ -148,6 +148,8 @@ def _transcribe_mlx(
     import mlx_whisper
 
     repo = mlx_repo_for(settings.whisper_model)
+    _log(progress, f"Loading Whisper model ({settings.whisper_model})…")
+    ensure_whisper_model_downloaded(settings.whisper_model, settings.backend, on_progress)
     _log(progress, f"Transcribing with MLX ({repo})…")
     if on_progress:
         on_progress("Transcribing (MLX, no live progress)", 0.0, None)
@@ -192,6 +194,7 @@ def _transcribe_faster_whisper(
     from faster_whisper import BatchedInferencePipeline, WhisperModel
 
     _log(progress, f"Loading Whisper model ({settings.whisper_model})…")
+    ensure_whisper_model_downloaded(settings.whisper_model, settings.backend, on_progress)
     model = WhisperModel(
         settings.whisper_model,
         device=settings.device,

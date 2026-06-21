@@ -6,6 +6,9 @@ import importlib.util
 import os
 import platform
 import sys
+import threading
+import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from dotenv import load_dotenv
@@ -105,6 +108,91 @@ def downloaded_whisper_models(backend: str) -> set[str]:
         if repo and repo in cached:
             ready.add(model)
     return ready
+
+
+def ensure_whisper_model_downloaded(
+    model: str,
+    backend: str,
+    on_progress: Callable[[str, float, float | None], None] | None = None,
+) -> None:
+    """Download a Whisper model snapshot when it is missing from the local HF cache."""
+    repo_id = whisper_repo_for(model, backend)
+    if not repo_id:
+        return
+
+    from huggingface_hub import HfApi, hf_hub_download, snapshot_download
+
+    if not on_progress:
+        if model in downloaded_whisper_models(backend):
+            return
+        snapshot_download(repo_id)
+        return
+
+    from tqdm.auto import tqdm
+
+    files = HfApi().list_repo_files(repo_id)
+    if not files:
+        snapshot_download(repo_id)
+        return
+
+    started = time.monotonic()
+    state = {"frac": 0.0, "eta": None}
+    state_lock = threading.Lock()
+    done = threading.Event()
+    errors: list[BaseException] = []
+    on_progress("Downloading model", 0.0, None)
+
+    def progress_class(file_base: float, file_weight: float):
+        class DownloadProgress(tqdm):
+            def __init__(self, *args, **kwargs):  # noqa: ANN002, ANN003
+                kwargs["disable"] = True
+                super().__init__(*args, **kwargs)
+
+            def update(self, n=1):  # noqa: ANN001
+                displayed = super().update(n)
+                total = float(self.total or 0.0)
+                current = float(self.n or 0.0)
+                file_frac = current / total if total else 0.0
+                frac = min(file_base + file_frac * file_weight, 1.0)
+                elapsed = time.monotonic() - started
+                eta = (elapsed / frac - elapsed) if 0 < frac < 1 else None
+                with state_lock:
+                    state["frac"] = frac
+                    state["eta"] = eta
+                return displayed
+
+        return DownloadProgress
+
+    def download() -> None:
+        try:
+            for file_index, filename in enumerate(files):
+                hf_hub_download(
+                    repo_id,
+                    filename,
+                    tqdm_class=progress_class(file_index / len(files), 1.0 / len(files)),
+                )
+                with state_lock:
+                    state["frac"] = min((file_index + 1) / len(files), 1.0)
+                    state["eta"] = None
+        except BaseException as exc:
+            errors.append(exc)
+        finally:
+            done.set()
+
+    thread = threading.Thread(target=download, name="hf-model-download", daemon=True)
+    thread.start()
+
+    while not done.wait(0.2):
+        with state_lock:
+            frac = float(state["frac"])
+            eta = state["eta"]
+        on_progress("Downloading model", frac, eta)
+
+    thread.join()
+    if errors:
+        raise errors[0]
+
+    on_progress("Downloading model", 1.0, 0.0)
 
 
 def is_apple_silicon() -> bool:
