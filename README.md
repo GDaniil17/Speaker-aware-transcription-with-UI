@@ -6,17 +6,6 @@ Speaker Transcribe uses Whisper for speech-to-text and pyannote.audio for
 speaker diarization. It can process audio or video files and export transcripts
 as text, JSON, SRT, or VTT.
 
-## Screenshots
-
-<p>
-  <img src="docs/screenshots/ui-desktop.png" alt="Speaker Transcribe desktop UI with settings sidebar and upload workflow" width="100%">
-</p>
-
-<p>
-  <img src="docs/screenshots/processed-file.png" alt="Processed Movie.mp4 with transcript, video preview, and speaker-labeled lines" width="48%">
-  <img src="docs/screenshots/speaker-editor.png" alt="Speaker editor with renamed speaker label and editable speaker controls" width="48%">
-</p>
-
 ## What It Does
 
 - Transcribes audio and video files.
@@ -196,6 +185,20 @@ src/speaker_transcribe/
   pipeline.py                Whisper + pyannote pipeline
 tests/                       unit tests
 ```
+
+## Screenshots
+
+<p>
+  <img src="docs/screenshots/ui-desktop.png" alt="Speaker Transcribe desktop UI with settings sidebar and upload workflow" width="100%">
+</p>
+
+<p>
+  <img src="docs/screenshots/processed-file.png" alt="Processed Movie.mp4 with transcript, video preview, and speaker-labeled lines" width="48%">
+</p>
+
+<p>
+  <img src="docs/screenshots/speaker-editor.png" alt="Speaker editor with renamed speaker label and editable speaker controls" width="48%">
+</p>
 
 ## Troubleshooting
 
