@@ -183,6 +183,15 @@ class Settings:
     backend: str = "auto"
     beam_size: int | None = None
     vad_filter: bool = True
+    temperature: float | tuple[float, ...] = (0.0, 0.2, 0.4, 0.6, 0.8, 1.0)
+    condition_on_previous_text: bool = True
+    initial_prompt: str | None = None
+    compression_ratio_threshold: float | None = 2.4
+    log_prob_threshold: float | None = -1.0
+    no_speech_threshold: float | None = 0.6
+    hallucination_silence_threshold: float | None = None
+    batch_size: int = 8
+    chunk_length: int = 60
 
     device: str = ""
     compute_type: str = ""

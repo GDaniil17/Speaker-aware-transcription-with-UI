@@ -533,6 +533,17 @@ def render_file_browser(start_dir: str) -> None:
         ss.picked_path = str(cur / choice[2:].strip())
 
 
+TEMPERATURE_PRESETS: dict[str, float | tuple[float, ...]] = {
+    "Fallback schedule": (0.0, 0.2, 0.4, 0.6, 0.8, 1.0),
+    "0.0 deterministic": 0.0,
+    "0.2": 0.2,
+    "0.4": 0.4,
+    "0.6": 0.6,
+    "0.8": 0.8,
+    "1.0 creative": 1.0,
+}
+
+
 with st.sidebar:
     st.header("Settings")
 
@@ -654,6 +665,105 @@ with st.sidebar:
     vad_filter = st.checkbox("VAD filter (skip silence)", value=True)
     if resolved_backend == "mlx":
         st.caption("ℹ️ Beam size and VAD filter apply to faster-whisper only.")
+
+    with st.expander("Advanced Whisper parameters", expanded=False):
+        temperature_label = st.selectbox(
+            "Temperature",
+            list(TEMPERATURE_PRESETS),
+            index=0,
+            help="0.0 is most stable. The fallback schedule retries at higher "
+            "temperatures when decoding looks unreliable.",
+        )
+        temperature = TEMPERATURE_PRESETS[temperature_label]
+        condition_on_previous_text = st.checkbox(
+            "Condition on previous text",
+            value=True,
+            help="Keeps context between chunks. Turn off if Whisper repeats text "
+            "or carries a bad phrase through the transcript.",
+        )
+        initial_prompt_text = st.text_area(
+            "Initial prompt",
+            value="",
+            height=80,
+            placeholder="Names, jargon, spelling hints...",
+            help="Optional context passed to Whisper before transcription starts.",
+        )
+        initial_prompt = initial_prompt_text.strip() or None
+
+        chunk_length = int(
+            st.slider(
+                "Chunk length (s)",
+                min_value=15,
+                max_value=120,
+                value=60,
+                step=15,
+                help="Longer chunks preserve more context; shorter chunks can feel "
+                "more responsive and use less memory.",
+            )
+        )
+        compression_ratio_threshold = float(
+            st.number_input(
+                "Compression ratio threshold",
+                min_value=0.0,
+                max_value=10.0,
+                value=2.4,
+                step=0.1,
+                help="Rejects overly repetitive decoded text above this ratio.",
+            )
+        )
+        log_prob_threshold = float(
+            st.number_input(
+                "Log probability threshold",
+                min_value=-10.0,
+                max_value=0.0,
+                value=-1.0,
+                step=0.1,
+                help="Rejects low-confidence decoded text below this average log probability.",
+            )
+        )
+        no_speech_threshold = float(
+            st.slider(
+                "No-speech threshold",
+                min_value=0.0,
+                max_value=1.0,
+                value=0.6,
+                step=0.05,
+                help="Higher values make Whisper more willing to skip silent segments.",
+            )
+        )
+        use_hallucination_guard = st.checkbox(
+            "Hallucination silence guard",
+            value=False,
+            help="Skips likely hallucinated output after long silence. Useful for "
+            "music, noise, or sparse speech.",
+        )
+        hallucination_silence_threshold = (
+            float(
+                st.slider(
+                    "Silence guard threshold (s)",
+                    min_value=0.5,
+                    max_value=10.0,
+                    value=2.0,
+                    step=0.5,
+                    disabled=not use_hallucination_guard,
+                )
+            )
+            if use_hallucination_guard
+            else None
+        )
+        if resolved_backend == "mlx":
+            batch_size = 8
+        else:
+            batch_size = int(
+                st.slider(
+                    "Batch size",
+                    min_value=1,
+                    max_value=32,
+                    value=8,
+                    step=1,
+                    help="Higher can be faster on GPU and use more memory.",
+                )
+            )
 
 tab_upload, tab_path = st.tabs(["📤 Upload file", "📁 Local path"])
 input_path: str | None = None
@@ -818,6 +928,15 @@ if run and input_path:
         backend=backend,
         beam_size=beam_size,
         vad_filter=vad_filter,
+        temperature=temperature,
+        condition_on_previous_text=condition_on_previous_text,
+        initial_prompt=initial_prompt,
+        compression_ratio_threshold=compression_ratio_threshold,
+        log_prob_threshold=log_prob_threshold,
+        no_speech_threshold=no_speech_threshold,
+        hallucination_silence_threshold=hallucination_silence_threshold,
+        batch_size=batch_size,
+        chunk_length=chunk_length,
         hf_token=hf_token.strip() or None,
     )
 

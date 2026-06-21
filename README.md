@@ -1,134 +1,222 @@
-# 🎙️ Speaker Transcribe
+# Speaker Transcribe
 
-Local, speaker-aware transcription for interviews, podcasts, and meetings.
-It combines **Whisper** (faster-whisper) for transcription with **pyannote.audio**
-for speaker diarization, so the output tells you *who said what* — ready for
-interview annotation, podcast processing, or subtitle generation.
+Local transcription with speaker labels.
 
-Everything runs **locally**. No audio leaves your machine.
+Speaker Transcribe uses Whisper for speech-to-text and pyannote.audio for
+speaker diarization. It can process audio or video files and export transcripts
+as text, JSON, SRT, or VTT.
 
-## Features
+## Screenshots
 
-- Upload an audio/video file **or** point to a local path.
-- Speaker diarization + transcription → transcript grouped by speaker.
-- Export to **`.txt`**, **`.json`**, **`.srt`**, **`.vtt`**.
-- Works on long recordings, with a **fragment mode** (first N seconds / time range)
-  for fast iteration and testing.
-- Streamlit UI **and** a CLI.
-- **Apple Silicon acceleration** via MLX (`mlx-whisper`) — auto-selected on M-series
-  Macs for much faster transcription; falls back to faster-whisper (CUDA/CPU)
-  elsewhere.
-- Reproducible: [uv](https://docs.astral.sh/uv/) for deps, `ruff` for lint/format,
-  Docker for a clean environment.
+<p>
+  <img src="docs/screenshots/ui-desktop.png" alt="Speaker Transcribe desktop UI with settings sidebar and upload workflow" width="100%">
+</p>
 
-## Prerequisites
+<p>
+  <img src="docs/screenshots/processed-file.png" alt="Processed Movie.mp4 with transcript, video preview, and speaker-labeled lines" width="48%">
+  <img src="docs/screenshots/speaker-editor.png" alt="Speaker editor with renamed speaker label and editable speaker controls" width="48%">
+</p>
 
-1. **HuggingFace token** (needed for diarization):
-   - Create one at https://huggingface.co/settings/tokens
-   - Accept the model terms at
-     https://huggingface.co/pyannote/speaker-diarization-community-1
-2. **ffmpeg** — used to decode audio/video. Installed automatically inside Docker.
-   Locally: `brew install ffmpeg` (a bundled fallback via `imageio-ffmpeg` is used
-   if it's missing).
+## What It Does
 
-Copy the token into a `.env` file:
+- Transcribes audio and video files.
+- Detects speakers and groups transcript lines by speaker.
+- Lets you process the whole file, the first N seconds, or a time range.
+- Runs from a Streamlit UI or the `transcribe` CLI.
+- Exports `.txt`, `.json`, `.srt`, and `.vtt`.
+- Runs locally. Audio is not sent to an external transcription API.
+
+## Requirements
+
+- Python 3.11 or 3.12
+- [uv](https://docs.astral.sh/uv/)
+- ffmpeg
+- HuggingFace token for diarization
+
+For diarization, create a HuggingFace token and accept the pyannote model terms:
+
+- https://huggingface.co/settings/tokens
+- https://huggingface.co/pyannote/speaker-diarization-community-1
+
+Create `.env`:
 
 ```bash
 cp .env.example .env
-# then edit .env and set HF_TOKEN=hf_...
 ```
 
-## Run locally (uv)
-
-With `make` (from zero):
+Then set:
 
 ```bash
-make run        # uv sync + launch the UI at http://localhost:8501
-make cli FILE="sample-interview.mp3" DURATION=60 MODEL=small   # quick fragment test
-make check      # lint + tests
-make help       # all targets
+HF_TOKEN=hf_...
 ```
 
-Or directly:
+If ffmpeg is missing:
 
 ```bash
-uv sync                              # create venv + install deps (first run downloads a lot)
-uv run streamlit run app.py         # open http://localhost:8501
+brew install ffmpeg
 ```
 
-In the UI: pick a Whisper model (start with `small` for quick tests), choose a
-fragment (e.g. *First 60 seconds*), provide a file, and click **Transcribe**.
+Docker installs ffmpeg inside the image.
 
-> 💡 The first run also downloads the Whisper and pyannote models. Subsequent
-> runs reuse the HuggingFace cache.
-
-### CLI (quick fragment tests)
+## Quick Start
 
 ```bash
-# First 60 seconds of the sample interview, fast model, txt + srt output:
+make run
+```
+
+Open:
+
+```text
+http://localhost:8501
+```
+
+In the UI:
+
+1. Choose a Whisper model.
+2. Choose a language, or use auto-detect.
+3. Choose whole file or a fragment.
+4. Upload a file or enter a local path.
+5. Click `Transcribe`.
+6. Download the formats you need.
+
+Use `small` for quick tests. Use `large-v3` or `large-v3-turbo` for better final output.
+
+## CLI
+
+Process the first 60 seconds:
+
+```bash
 uv run transcribe \
-  --input "sample-interview.mp3" \
-  --duration 60 --model small --formats txt srt
-
-# A specific time range, autodetect language:
-uv run transcribe --input sample-meeting.mp4 --start 120 --duration 90 \
-  --language auto --formats txt json srt vtt
+  --input sample-interview.mp3 \
+  --duration 60 \
+  --model small \
+  --language auto \
+  --formats txt srt
 ```
 
-## Run with Docker
+Process a specific range:
 
 ```bash
-make docker-up           # build + run; open http://localhost:8501
-# or:  docker compose up --build
-# (HF_TOKEN is read from your shell or the .env file)
+uv run transcribe \
+  --input sample-meeting.mp4 \
+  --start 120 \
+  --duration 90 \
+  --language auto \
+  --formats txt json srt vtt
 ```
 
-- Downloaded models are cached in `./hf_cache` (mounted volume), so they persist
-  across runs.
-- To use the **local path** input inside the container, drop files into `./data`
-  and reference them as `/data/some_file.mp3`.
+Write output files to a custom directory:
 
-> The Docker image is CPU-only (no GPU passthrough on macOS). On a CUDA host the
-> code auto-detects the GPU when torch sees one.
+```bash
+uv run transcribe \
+  --input sample-meeting.mp4 \
+  --out-dir outputs \
+  --formats txt json
+```
+
+List available Whisper models:
+
+```bash
+uv run transcribe --list-models
+```
+
+## Docker
+
+```bash
+make docker-up
+```
+
+Open:
+
+```text
+http://localhost:8501
+```
+
+Docker notes:
+
+- `HF_TOKEN` is read from your shell or `.env`.
+- Model downloads are cached in `./hf_cache`.
+- Put files in `./data` when using local paths inside Docker.
+- In Docker, refer to those files as `/data/file.mp3`.
+
+## Models And Backends
+
+Backend selection:
+
+- `auto`: MLX on Apple Silicon, otherwise faster-whisper.
+- `mlx`: Apple Silicon GPU backend.
+- `faster-whisper`: CUDA if available, otherwise CPU.
+
+Useful models:
+
+| Model | Best for |
+| --- | --- |
+| `small` | Fast tests |
+| `medium` | Better quality without huge runtime |
+| `large-v3` | Best quality, slow on CPU |
+| `large-v3-turbo` / `turbo` | Near-large quality, faster |
+| `distil-*` / `*.en` | English-only, faster |
+
+## Output Files
+
+The CLI writes files next to the input unless `--out-dir` is set.
+
+Supported formats:
+
+- `txt`: readable transcript
+- `json`: structured segments
+- `srt`: subtitles
+- `vtt`: web subtitles
 
 ## Development
 
 ```bash
-uv run ruff check .      # lint
-uv run ruff format .     # format
-uv run pytest            # tests (export + audio; no model download needed)
+make test
+make lint
+make check
 ```
 
-## Project layout
+Direct commands:
 
+```bash
+uv run pytest
+uv run ruff check .
+uv run ruff format .
 ```
-app.py                       # Streamlit UI
+
+## Project Layout
+
+```text
+app.py                       Streamlit UI
 src/speaker_transcribe/
-  config.py                  # settings + device/token detection
-  audio.py                   # ffmpeg: fragment extraction → 16 kHz mono WAV
-  pipeline.py                # diarization (pyannote) + transcription (Whisper)
-  export.py                  # txt / json / srt / vtt exporters
-  cli.py                     # command-line entry point (`transcribe`)
-tests/                       # unit tests
-code_from_notebook_base.py   # original example (kept for reference)
+  audio.py                   audio extraction and fragment handling
+  cli.py                     transcribe command
+  config.py                  settings, models, device detection
+  export.py                  txt/json/srt/vtt exporters
+  pipeline.py                Whisper + pyannote pipeline
+tests/                       unit tests
 ```
 
-## Notes & troubleshooting
+## Troubleshooting
 
-- **`large-v3` on CPU is slow.** Use `small`/`medium` for testing, or the fragment
-  mode, and switch to `large-v3` for final quality. `large-v3-turbo` (alias `turbo`)
-  is multilingual and much faster than `large-v3` with near-large quality.
-- **Model language coverage.** `tiny…large-v3` and `turbo` are multilingual;
-  the `distil-*`/`*.en` models are **English-only**. Run `uv run transcribe
-  --list-models` to see the full list, or pick one in the UI dropdown.
-- **Backends.** `auto` picks **MLX** on Apple Silicon (Mac GPU, fastest there)
-  and **faster-whisper** otherwise (CUDA, else CPU). Override in the UI sidebar
-  or with `--backend {auto,mlx,faster-whisper}`. MLX downloads `mlx-community/*`
-  model weights on first use; `beam size`/`VAD` apply to faster-whisper only.
-- **Diarization** runs through pyannote and auto-uses the fastest torch device
-  (`cuda` > `mps` Apple GPU > `cpu`), falling back to CPU if an op is
-  unsupported. On Apple Silicon, MPS makes it dramatically faster (≈9× in our
-  test) — without it, diarizing a long file on CPU can look "stuck" for minutes.
-  Progress is reported per pyannote step on the progress bar.
-- **Diarization auth errors** usually mean the token is missing or you haven't
-  accepted the model terms on HuggingFace.
+`HF_TOKEN` errors:
+
+- Check `.env`.
+- Accept the pyannote model terms on HuggingFace.
+
+Slow transcription:
+
+- Use `small` or `medium` while testing.
+- Use a fragment with `--duration`.
+- Avoid `large-v3` on CPU for quick runs.
+
+No speaker labels:
+
+- Make sure diarization is enabled.
+- Check that `HF_TOKEN` is valid.
+- Set realistic `--min-speakers` and `--max-speakers`.
+
+Docker local paths do not work:
+
+- Put files in `./data`.
+- Use `/data/<filename>` in the app.

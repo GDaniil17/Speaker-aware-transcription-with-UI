@@ -155,6 +155,13 @@ def _transcribe_mlx(
         str(wav_path),
         path_or_hf_repo=repo,
         language=settings.language,
+        temperature=settings.temperature,
+        compression_ratio_threshold=settings.compression_ratio_threshold,
+        logprob_threshold=settings.log_prob_threshold,
+        no_speech_threshold=settings.no_speech_threshold,
+        condition_on_previous_text=settings.condition_on_previous_text,
+        initial_prompt=settings.initial_prompt,
+        hallucination_silence_threshold=settings.hallucination_silence_threshold,
         word_timestamps=False,
         verbose=None,
     )
@@ -191,7 +198,7 @@ def _transcribe_faster_whisper(
         compute_type=settings.compute_type,
     )
     pipeline = BatchedInferencePipeline(model)
-    pipeline.chunk_length = 60
+    pipeline.chunk_length = settings.chunk_length
 
     _log(progress, "Transcribing…")
     if on_progress:
@@ -200,8 +207,17 @@ def _transcribe_faster_whisper(
         str(wav_path),
         language=settings.language,
         beam_size=settings.beam_size,
+        temperature=settings.temperature,
+        compression_ratio_threshold=settings.compression_ratio_threshold,
+        log_prob_threshold=settings.log_prob_threshold,
+        no_speech_threshold=settings.no_speech_threshold,
+        condition_on_previous_text=settings.condition_on_previous_text,
+        initial_prompt=settings.initial_prompt,
         word_timestamps=False,
         vad_filter=settings.vad_filter,
+        hallucination_silence_threshold=settings.hallucination_silence_threshold,
+        batch_size=settings.batch_size,
+        chunk_length=settings.chunk_length,
     )
 
     total = getattr(info, "duration", None) or settings.duration
