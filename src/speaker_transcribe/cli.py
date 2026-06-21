@@ -10,7 +10,13 @@ import argparse
 import sys
 from pathlib import Path
 
-from speaker_transcribe.config import WHISPER_MODELS, Settings, describe_runtime
+from speaker_transcribe.config import (
+    ENGINES,
+    Settings,
+    describe_runtime,
+    engine_available,
+    engine_install_hint,
+)
 from speaker_transcribe.export import EXPORTERS, export
 from speaker_transcribe.pipeline import run_pipeline
 
@@ -29,17 +35,25 @@ def build_parser() -> argparse.ArgumentParser:
         help="Process only this many seconds (great for testing).",
     )
     p.add_argument(
+        "--engine",
+        default="whisper",
+        choices=list(ENGINES),
+        help="ASR engine. whisper (default), parakeet (NVIDIA, 25 EU langs), "
+        "qwen3-asr (Qwen3-ASR-1.7B, 30 langs). Non-Whisper engines need an extra "
+        "install — see --list-models.",
+    )
+    p.add_argument(
         "--model",
-        default="large-v3",
+        default=None,
         metavar="NAME",
-        help="Whisper model. Multilingual: tiny, base, small, medium, large-v3, "
-        "large-v3-turbo, turbo. English-only: distil-large-v3, distil-large-v3.5, "
-        "distil-medium.en, distil-small.en. See --list-models.",
+        help="Model id for the chosen engine (default: engine's default model). "
+        "For Whisper: tiny, base, small, medium, large-v3, large-v3-turbo, turbo, "
+        "distil-*. See --list-models.",
     )
     p.add_argument(
         "--list-models",
         action="store_true",
-        help="List known Whisper models with language coverage and exit.",
+        help="List engines and their models with language coverage, then exit.",
     )
     p.add_argument(
         "--language",
@@ -78,21 +92,48 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
 
     if args.list_models:
-        width = max(len(m) for m in WHISPER_MODELS)
-        for name, desc in WHISPER_MODELS.items():
-            print(f"  {name:<{width}}  {desc}")
+        for engine in ENGINES.values():
+            extra = engine_install_hint(engine.key)
+            tag = "" if engine_available(engine.key) else f"  (needs: {extra})"
+            print(f"\n{engine.label}{tag} — {engine.description}")
+            width = max(len(m) for m in engine.models)
+            for name, desc in engine.models.items():
+                print(f"  {name:<{width}}  {desc}")
         return 0
 
     if not args.input:
         print("Error: --input is required (or use --list-models).", file=sys.stderr)
         return 2
 
+    engine = ENGINES[args.engine]
+    if not engine_available(args.engine):
+        print(
+            f"Error: engine '{args.engine}' is not installed. "
+            f"Install it with: {engine_install_hint(args.engine)}",
+            file=sys.stderr,
+        )
+        return 2
+
+    model = args.model or next(iter(engine.models))
+
+    language = None if args.language == "auto" else args.language
+    if engine.languages is None:
+        language = None  # Parakeet auto-detects its language
+    elif language is not None and language not in engine.languages:
+        print(
+            f"Error: language '{language}' is not supported by {engine.label}. "
+            f"Supported: {', '.join(sorted(engine.languages))} (or 'auto').",
+            file=sys.stderr,
+        )
+        return 2
+
     settings = Settings(
         input_path=args.input,
         start=args.start,
         duration=args.duration,
-        whisper_model=args.model,
-        language=None if args.language == "auto" else args.language,
+        engine=args.engine,
+        whisper_model=model,
+        language=language,
         min_speakers=args.min_speakers,
         max_speakers=args.max_speakers,
         backend=args.backend,

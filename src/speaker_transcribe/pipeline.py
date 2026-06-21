@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import tempfile
 import time
 from collections.abc import Callable, Iterator
@@ -9,7 +10,19 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from speaker_transcribe.audio import prepare_audio
-from speaker_transcribe.config import Settings, ensure_whisper_model_downloaded, mlx_repo_for
+from speaker_transcribe.config import (
+    PARAKEET_REPOS,
+    QWEN3_ALIGNER_REPO,
+    QWEN3_ASR_LANGUAGES,
+    QWEN3_ASR_REPO,
+    SENSEVOICE_LANGUAGES,
+    SENSEVOICE_REPO,
+    Settings,
+    ensure_repo_downloaded,
+    ensure_whisper_model_downloaded,
+    is_apple_silicon,
+    mlx_repo_for,
+)
 
 ProgressFn = Callable[[str], None]
 ProgressBarFn = Callable[[str, float, float | None], None]
@@ -28,6 +41,11 @@ class TranscriptSegment:
 def _log(progress: ProgressFn | None, msg: str) -> None:
     if progress:
         progress(msg)
+
+
+def importlib_found(name: str) -> bool:
+    """True when a module can be imported (used to pick optional engine backends)."""
+    return importlib.util.find_spec(name) is not None
 
 
 def _make_diarization_hook(progress: ProgressFn | None, on_progress: ProgressBarFn | None):
@@ -127,8 +145,14 @@ def _transcribe(
     progress: ProgressFn | None,
     on_progress: ProgressBarFn | None = None,
 ) -> Iterator[TranscriptSegment]:
-    """Dispatch to the configured transcription backend."""
-    if settings.backend == "mlx":
+    """Dispatch to the configured transcription engine."""
+    if settings.engine == "parakeet":
+        yield from _transcribe_parakeet(wav_path, settings, diar, sp_map, progress, on_progress)
+    elif settings.engine == "qwen3-asr":
+        yield from _transcribe_qwen3(wav_path, settings, diar, sp_map, progress, on_progress)
+    elif settings.engine == "sensevoice":
+        yield from _transcribe_sensevoice(wav_path, settings, diar, sp_map, progress, on_progress)
+    elif settings.backend == "mlx":
         yield from _transcribe_mlx(wav_path, settings, diar, sp_map, progress, on_progress)
     else:
         yield from _transcribe_faster_whisper(
@@ -216,6 +240,8 @@ def _transcribe_faster_whisper(
         no_speech_threshold=settings.no_speech_threshold,
         condition_on_previous_text=settings.condition_on_previous_text,
         initial_prompt=settings.initial_prompt,
+        repetition_penalty=settings.repetition_penalty,
+        no_repeat_ngram_size=settings.no_repeat_ngram_size,
         word_timestamps=False,
         vad_filter=settings.vad_filter,
         hallucination_silence_threshold=settings.hallucination_silence_threshold,
@@ -241,6 +267,327 @@ def _transcribe_faster_whisper(
 
     if on_progress:
         on_progress("Transcribing", 1.0, 0.0)
+
+
+def _emit(
+    start: float,
+    end: float,
+    text: str,
+    diar: list[dict],
+    sp_map: dict,
+) -> TranscriptSegment | None:
+    """Build a speaker-attributed segment, or None when the text is empty."""
+    text = (text or "").strip()
+    if not text:
+        return None
+    return TranscriptSegment(start, end, _speaker_for(start, end, diar, sp_map), text)
+
+
+def _transcribe_parakeet(
+    wav_path: Path,
+    settings: Settings,
+    diar: list[dict],
+    sp_map: dict,
+    progress: ProgressFn | None,
+    on_progress: ProgressBarFn | None = None,
+) -> Iterator[TranscriptSegment]:
+    """Transcribe with NVIDIA Parakeet (MLX on Apple Silicon, else NeMo).
+
+    Parakeet auto-detects its language (25 European languages); settings.language
+    is ignored. Both backends yield sentence-level timestamps.
+    """
+    use_mlx = is_apple_silicon() and importlib_found("parakeet_mlx")
+    _log(progress, "Loading Parakeet model…")
+    if on_progress:
+        on_progress("Transcribing (Parakeet, no live progress)", 0.0, None)
+
+    if use_mlx:
+        from parakeet_mlx import from_pretrained
+
+        repo = PARAKEET_REPOS["mlx"]
+        ensure_repo_downloaded(repo, on_progress)
+        _log(progress, f"Transcribing with Parakeet MLX ({repo})…")
+        model = from_pretrained(repo)
+        result = model.transcribe(
+            str(wav_path),
+            chunk_duration=120.0,
+            overlap_duration=15.0,
+        )
+        rows = [(s.start, s.end, s.text) for s in result.sentences]
+    else:
+        if not importlib_found("nemo"):
+            raise RuntimeError(
+                "Parakeet needs NeMo (or parakeet-mlx on Apple Silicon). "
+                "Install it with: uv pip install '.[parakeet]'"
+            )
+        import nemo.collections.asr as nemo_asr  # type: ignore
+
+        repo = PARAKEET_REPOS["nemo"]
+        ensure_repo_downloaded(repo, on_progress)
+        _log(progress, f"Transcribing with Parakeet NeMo ({repo})…")
+        model = nemo_asr.models.ASRModel.from_pretrained(repo)
+        out = model.transcribe([str(wav_path)], timestamps=True)
+        first = out[0]
+        stamp = first.timestamp if hasattr(first, "timestamp") else first["timestamp"]
+        segs = stamp["segment"]
+        rows = [(s["start"], s["end"], s.get("segment", s.get("text", ""))) for s in segs]
+
+    total = rows[-1][1] if rows else (settings.duration or None)
+    for start, end, text in rows:
+        if on_progress and total:
+            on_progress("Transcribing", min(end / total, 1.0), 0.0)
+        seg = _emit(start, end, text, diar, sp_map)
+        if seg:
+            yield seg
+
+    if on_progress:
+        on_progress("Transcribing", 1.0, 0.0)
+
+
+def _transcribe_qwen3(
+    wav_path: Path,
+    settings: Settings,
+    diar: list[dict],
+    sp_map: dict,
+    progress: ProgressFn | None,
+    on_progress: ProgressBarFn | None = None,
+) -> Iterator[TranscriptSegment]:
+    """Transcribe with Qwen3-ASR-1.7B + its forced aligner for word timestamps.
+
+    The aligner handles up to ~5 minutes per call, so long audio is split into
+    fixed windows; word timestamps are offset back to absolute time and grouped
+    into sentence-like segments before speaker attribution.
+    """
+    if not importlib_found("qwen_asr"):
+        raise RuntimeError(
+            "Qwen3-ASR needs the qwen-asr package. "
+            "Install it with: uv pip install '.[qwen3-asr]'"
+        )
+    from qwen_asr import Qwen3ASRModel
+
+    _log(progress, "Loading Qwen3-ASR model…")
+    ensure_repo_downloaded(QWEN3_ASR_REPO, on_progress)
+    ensure_repo_downloaded(QWEN3_ALIGNER_REPO, on_progress)
+    if on_progress:
+        on_progress("Transcribing (Qwen3-ASR, no live progress)", 0.0, None)
+    model = Qwen3ASRModel.from_pretrained(
+        QWEN3_ASR_REPO, forced_aligner=QWEN3_ALIGNER_REPO
+    )
+
+    # Qwen wants the language *name* (e.g. "English"); None = auto-detect.
+    language = QWEN3_ASR_LANGUAGES.get(settings.language) if settings.language else None
+
+    words: list[tuple[float, float, str]] = []
+    with tempfile.TemporaryDirectory(prefix="qwen3_") as tmp:
+        chunks = list(_wav_windows(wav_path, Path(tmp), window_seconds=240))
+        for i, (chunk_path, chunk_start) in enumerate(chunks):
+            if on_progress and chunks:
+                on_progress("Transcribing", min(i / len(chunks), 1.0), None)
+            res = model.transcribe(
+                audio=str(chunk_path), language=language, return_time_stamps=True
+            )
+            if not res:
+                continue
+            for ts in res[0].time_stamps or []:
+                words.append(
+                    (
+                        chunk_start + float(ts.start_time),
+                        chunk_start + float(ts.end_time),
+                        str(ts.text),
+                    )
+                )
+
+    for start, end, text in _group_words(words):
+        seg = _emit(start, end, text, diar, sp_map)
+        if seg:
+            yield seg
+
+    if on_progress:
+        on_progress("Transcribing", 1.0, 0.0)
+
+
+def _wav_windows(
+    wav_path: Path,
+    out_dir: Path,
+    window_seconds: int = 240,
+) -> Iterator[tuple[Path, float]]:
+    """Split a mono 16 kHz WAV into fixed windows, yielding (path, start_seconds)."""
+    import wave
+
+    with wave.open(str(wav_path), "rb") as wf:
+        sr = wf.getframerate()
+        channels = wf.getnchannels()
+        sampwidth = wf.getsampwidth()
+        total = wf.getnframes()
+        window = window_seconds * sr
+        for index, offset in enumerate(range(0, max(total, 1), window)):
+            wf.setpos(offset)
+            frames = wf.readframes(min(window, total - offset))
+            if not frames:
+                break
+            out = out_dir / f"window_{index:04d}.wav"
+            with wave.open(str(out), "wb") as ww:
+                ww.setnchannels(channels)
+                ww.setsampwidth(sampwidth)
+                ww.setframerate(sr)
+                ww.writeframes(frames)
+            yield out, offset / sr
+
+
+def _transcribe_sensevoice(
+    wav_path: Path,
+    settings: Settings,
+    diar: list[dict],
+    sp_map: dict,
+    progress: ProgressFn | None,
+    on_progress: ProgressBarFn | None = None,
+) -> Iterator[TranscriptSegment]:
+    """Transcribe with FunAudioLLM SenseVoiceSmall via FunASR.
+
+    SenseVoice covers 5 languages (zh/yue/en/ja/ko) and returns word-level
+    CTC-alignment timestamps, which are grouped into readable segments before
+    speaker attribution.
+    """
+    if not importlib_found("funasr"):
+        raise RuntimeError(
+            "SenseVoice needs the funasr package. "
+            "Install it with: uv pip install '.[sensevoice]'"
+        )
+    from funasr import AutoModel
+
+    _log(progress, "Loading SenseVoice model…")
+    ensure_repo_downloaded(SENSEVOICE_REPO, on_progress)
+    if on_progress:
+        on_progress("Transcribing (SenseVoice, no live progress)", 0.0, None)
+    model = AutoModel(
+        model=SENSEVOICE_REPO,
+        vad_model="fsmn-vad",
+        vad_kwargs={"max_single_segment_time": 30000},
+        hub="hf",
+        disable_update=True,
+    )
+
+    language = settings.language if settings.language in SENSEVOICE_LANGUAGES else "auto"
+    _log(progress, "Transcribing with SenseVoice…")
+    res = model.generate(
+        input=str(wav_path),
+        cache={},
+        language=language,
+        use_itn=True,
+        batch_size_s=60,
+        merge_vad=True,
+        merge_length_s=15,
+        output_timestamp=True,
+    )
+
+    first = res[0] if res else {}
+    words = _merge_subwords(_sensevoice_words(first))
+    if words:
+        for start, end, text in _group_words(words):
+            seg = _emit(start, end, text, diar, sp_map)
+            if seg:
+                yield seg
+    elif first.get("text"):
+        # No timestamps came back — emit the whole utterance as one segment.
+        from funasr.utils.postprocess_utils import rich_transcription_postprocess
+
+        text = rich_transcription_postprocess(first["text"])
+        seg = _emit(0.0, _wav_duration(wav_path), text, diar, sp_map)
+        if seg:
+            yield seg
+
+    if on_progress:
+        on_progress("Transcribing", 1.0, 0.0)
+
+
+def _sensevoice_words(result: dict) -> list[tuple[float, float, str]]:
+    """Pair SenseVoice `words` with `timestamp` ([start_ms, end_ms]) as second tuples."""
+    words = result.get("words") or []
+    stamps = result.get("timestamp") or []
+    out: list[tuple[float, float, str]] = []
+    for token, ts in zip(words, stamps, strict=False):
+        if not ts or len(ts) < 2:
+            continue
+        out.append((ts[0] / 1000.0, ts[1] / 1000.0, str(token)))
+    return out
+
+
+def _is_cjk(text: str) -> bool:
+    """True if the token holds CJK script, which SenseVoice emits one char per
+    token *without* a `▁` boundary marker (unlike Latin subword pieces)."""
+    return any(
+        "　" <= c <= "〿"  # CJK symbols & punctuation (。、…)
+        or "぀" <= c <= "ヿ"  # hiragana + katakana
+        or "㐀" <= c <= "鿿"  # CJK unified ideographs
+        or "가" <= c <= "힣"  # hangul syllables
+        or "＀" <= c <= "￯"  # fullwidth forms (！？etc.)
+        for c in text
+    )
+
+
+def _merge_subwords(tokens: list[tuple[float, float, str]]) -> list[tuple[float, float, str]]:
+    """Join SentencePiece subwords into words (a `▁` marks a new word boundary).
+
+    CJK languages have no `▁` markers — each character is its own token — so
+    those stay separate; only Latin subword pieces (no `▁`, no CJK) get joined
+    onto the previous word.
+    """
+    merged: list[list] = []
+    for start, end, text in tokens:
+        continuation = (
+            merged
+            and not text.startswith("▁")
+            and not _is_cjk(text)
+            and not _is_cjk(merged[-1][2])
+        )
+        if continuation:
+            merged[-1][1] = end
+            merged[-1][2] += text
+        else:
+            merged.append([start, end, text.lstrip("▁")])
+    return [(start, end, text) for start, end, text in merged if text.strip()]
+
+
+def _wav_duration(wav_path: Path) -> float:
+    """Duration of a WAV file in seconds."""
+    import wave
+
+    with wave.open(str(wav_path), "rb") as wf:
+        return wf.getnframes() / float(wf.getframerate() or 16000)
+
+
+def _join_tokens(tokens: list[str]) -> str:
+    """Join ASR tokens into text — spaces for word tokens, none for CJK characters."""
+    word_like = any(len(t.strip()) > 1 and t.strip().isalpha() for t in tokens)
+    sep = " " if word_like else ""
+    return sep.join(t.strip() for t in tokens if t.strip()).strip()
+
+
+def _group_words(
+    words: list[tuple[float, float, str]],
+    gap: float = 0.6,
+    max_chars: int = 240,
+) -> Iterator[tuple[float, float, str]]:
+    """Merge word/char timestamps into readable segments.
+
+    Breaks on sentence-ending punctuation, a silence gap longer than `gap`
+    seconds, or when a segment grows past `max_chars` characters.
+    """
+    cur: list[tuple[float, float, str]] = []
+
+    def flush() -> Iterator[tuple[float, float, str]]:
+        if cur:
+            yield cur[0][0], cur[-1][1], _join_tokens([w[2] for w in cur])
+
+    for i, w in enumerate(words):
+        cur.append(w)
+        text_so_far = "".join(x[2] for x in cur)
+        ends_sentence = w[2].strip().endswith((".", "?", "!", "。", "？", "！", "…"))
+        next_gap = words[i + 1][0] - w[1] if i + 1 < len(words) else 0.0
+        if ends_sentence or next_gap > gap or len(text_so_far) >= max_chars:
+            yield from flush()
+            cur = []
+    yield from flush()
 
 
 def run_pipeline(

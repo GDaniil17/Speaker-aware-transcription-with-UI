@@ -11,12 +11,19 @@ import json
 import os
 import shutil
 import tempfile
+import threading
+import time
 from pathlib import Path
 
 import streamlit as st
 import streamlit.components.v1 as components
 
 from speaker_transcribe.config import (
+    ENGINE_LANGUAGE_LISTS,
+    ENGINE_LANGUAGE_SUMMARY,
+    ENGINES,
+    HARDWARE_LABELS,
+    MODEL_GUIDANCE,
     WHISPER_LANGUAGES,
     WHISPER_MODELS,
     Settings,
@@ -26,7 +33,10 @@ from speaker_transcribe.config import (
     detect_device,
     detect_diarization_device,
     downloaded_whisper_models,
+    engine_available,
+    engine_install_hint,
     get_hf_token,
+    hardware_profile,
     is_english_only_model,
     mlx_available,
 )
@@ -52,11 +62,12 @@ st.caption("Whisper transcription + pyannote diarization — runs fully locally.
 MODEL_NAMES = list(WHISPER_MODELS)
 
 
-def format_eta(seconds: float) -> str:
-    """Human-readable remaining time, e.g. '1m 05s' or '12s'."""
+def format_duration(seconds: float) -> str:
+    """Format a duration as a clock, e.g. '00:42' or '1:05:03'."""
     seconds = max(0, int(round(seconds)))
-    m, s = divmod(seconds, 60)
-    return f"{m}m {s:02d}s" if m else f"{s}s"
+    h, rem = divmod(seconds, 3600)
+    m, s = divmod(rem, 60)
+    return f"{h:d}:{m:02d}:{s:02d}" if h else f"{m:02d}:{s:02d}"
 
 
 def format_clock(seconds: float) -> str:
@@ -575,24 +586,94 @@ with st.sidebar:
 
     device, compute_type = detect_device()
 
-    backend_options = ["Auto", "faster-whisper"]
-    if mlx_available():
-        backend_options.insert(1, "mlx")
-    backend_label = st.selectbox(
-        "Backend",
-        backend_options,
+    def _engine_label(key: str) -> str:
+        mark = "✅ " if engine_available(key) else "⬇️ "
+        return f"{mark}{ENGINES[key].label}"
+
+    engine = st.selectbox(
+        "Engine",
+        list(ENGINES),
         index=0,
-        help="MLX uses the Apple Silicon GPU — much faster on Mac. "
-        "faster-whisper uses CUDA or CPU.",
+        format_func=_engine_label,
+        help="Whisper (default) plus alternative local ASR models. "
+        "✅ = installed · ⬇️ = needs an extra install.",
     )
-    backend = "auto" if backend_label == "Auto" else backend_label
-    resolved_backend = detect_backend() if backend == "auto" else backend
+    st.caption(ENGINES[engine].description)
+    engine_ok = engine_available(engine)
+    if not engine_ok:
+        st.warning(
+            f"**{ENGINES[engine].label}** isn't installed. Run:\n\n"
+            f"`{engine_install_hint(engine)}`"
+        )
+
+    # Whisper-only knobs default to harmless values so Settings always has them.
+    backend = "auto"
+    beam_size: int | None = None
+    vad_filter = True
+    temperature: float | tuple[float, ...] = TEMPERATURE_PRESETS["Fallback schedule"]
+    condition_on_previous_text = True
+    initial_prompt: str | None = None
+    compression_ratio_threshold = 2.4
+    log_prob_threshold = -1.0
+    no_speech_threshold = 0.6
+    hallucination_silence_threshold: float | None = None
+    batch_size = 8
+    chunk_length = 60
+    language: str | None = None
+
+    if engine == "whisper":
+        backend_options = ["Auto", "faster-whisper"]
+        if mlx_available():
+            backend_options.insert(1, "mlx")
+        backend_label = st.selectbox(
+            "Backend",
+            backend_options,
+            index=0,
+            help="MLX uses the Apple Silicon GPU — much faster on Mac. "
+            "faster-whisper uses CUDA or CPU.",
+        )
+        backend = "auto" if backend_label == "Auto" else backend_label
+        resolved_backend = detect_backend() if backend == "auto" else backend
+        runtime_label = describe_runtime(resolved_backend, device, compute_type)
+    else:
+        resolved_backend = "auto"
+        runtime_label = ENGINES[engine].label
+
     diar_device = detect_diarization_device()
     st.info(
-        f"Transcription: **{describe_runtime(resolved_backend, device, compute_type)}**\n\n"
+        f"Transcription: **{runtime_label}**\n\n"
         f"Diarization: **pyannote · {diar_device}**"
     )
-    if not mlx_available():
+
+    profile = hardware_profile()
+    with st.expander(f"💡 Which engine & model should I use? (detected: {HARDWARE_LABELS[profile]})"):
+        st.markdown(f"**Recommended for {HARDWARE_LABELS[profile]}:**")
+        for eng_label, rec_model, why in MODEL_GUIDANCE[profile]:
+            st.markdown(f"- **{eng_label}** → `{rec_model}` — {why}")
+        st.markdown("**Language support by engine:**")
+        for key, summary in ENGINE_LANGUAGE_SUMMARY.items():
+            st.markdown(f"- **{ENGINES[key].label}**: {summary}")
+        st.caption(
+            "Rule of thumb: Whisper for the widest language coverage; Parakeet for fast "
+            "European-language audio; Qwen3-ASR for top accuracy on a GPU; SenseVoice when "
+            "your audio is Chinese/Cantonese/English/Japanese/Korean."
+        )
+
+    with st.expander("🌐 Supported languages (full list)"):
+        eng_filter = st.selectbox(
+            "Engine",
+            list(ENGINE_LANGUAGE_LISTS),
+            format_func=lambda k: ENGINES[k].label,
+            key="lang_list_engine",
+        )
+        langs = ENGINE_LANGUAGE_LISTS[eng_filter]
+        st.caption(f"{len(langs)} languages")
+        rows = "".join(
+            f"| {name.title()} | `{code}` |\n"
+            for code, name in sorted(langs.items(), key=lambda kv: kv[1])
+        )
+        st.markdown(f"| Language | Code |\n| --- | --- |\n{rows}")
+    if engine == "whisper" and not mlx_available():
         from speaker_transcribe.config import is_apple_silicon
 
         if is_apple_silicon():
@@ -605,51 +686,74 @@ with st.sidebar:
         help="Required for diarization. Accept the model terms on HuggingFace first.",
     )
 
-    downloaded = downloaded_whisper_models(resolved_backend)
+    if engine == "whisper":
+        downloaded = downloaded_whisper_models(resolved_backend)
 
-    def _model_label(m: str) -> str:
-        mark = "✅ " if m in downloaded else "⬇️ "
-        return f"{mark}{m} — {WHISPER_MODELS[m]}"
+        def _model_label(m: str) -> str:
+            mark = "✅ " if m in downloaded else "⬇️ "
+            return f"{mark}{m} — {WHISPER_MODELS[m]}"
 
-    model = st.selectbox(
-        "Whisper model",
-        MODEL_NAMES,
-        index=MODEL_NAMES.index("small"),
-        format_func=_model_label,
-        help="Smaller = faster (good for testing). large-v3 = best quality. "
-        "turbo/large-v3-turbo = fast & multilingual. distil-* = English only.\n\n"
-        "✅ = already downloaded (ready offline) · ⬇️ = will be fetched on first use.",
-    )
-    if model in downloaded:
-        st.caption("✅ Downloaded — ready to use right now.")
-    else:
-        st.caption("⬇️ Not downloaded yet — it'll be fetched on first run.")
-    english_only = is_english_only_model(model)
-    if english_only:
-        st.caption("⚠️ This is an English-only model.")
-
-    def _lang_label(code: str) -> str:
-        return "Auto-detect" if code == "auto" else f"{WHISPER_LANGUAGES[code].title()} ({code})"
-
-    if english_only:
-        st.selectbox(
-            "Language",
-            ["en"],
-            format_func=_lang_label,
-            disabled=True,
-            help="English-only model — language is fixed to English.",
+        model = st.selectbox(
+            "Whisper model",
+            MODEL_NAMES,
+            index=MODEL_NAMES.index("small"),
+            format_func=_model_label,
+            help="Smaller = faster (good for testing). large-v3 = best quality. "
+            "turbo/large-v3-turbo = fast & multilingual. distil-* = English only.\n\n"
+            "✅ = already downloaded (ready offline) · ⬇️ = will be fetched on first use.",
         )
-        language: str | None = "en"
+        if model in downloaded:
+            st.caption("✅ Downloaded — ready to use right now.")
+        else:
+            st.caption("⬇️ Not downloaded yet — it'll be fetched on first run.")
+        english_only = is_english_only_model(model)
+        if english_only:
+            st.caption("⚠️ This is an English-only model.")
+            st.selectbox(
+                "Language",
+                ["en"],
+                format_func=lambda c: "English (en)",
+                disabled=True,
+                help="English-only model — language is fixed to English.",
+            )
+            language = "en"
+        else:
+            lang_codes = ["auto"] + sorted(WHISPER_LANGUAGES, key=lambda c: WHISPER_LANGUAGES[c])
+            choice = st.selectbox(
+                "Language",
+                lang_codes,
+                index=0,
+                format_func=lambda c: (
+                    "Auto-detect" if c == "auto" else f"{WHISPER_LANGUAGES[c].title()} ({c})"
+                ),
+                help="Language of the audio. Auto-detect lets Whisper guess it.",
+            )
+            language = None if choice == "auto" else choice
     else:
-        lang_codes = ["auto"] + sorted(WHISPER_LANGUAGES, key=lambda c: WHISPER_LANGUAGES[c])
-        choice = st.selectbox(
-            "Language",
-            lang_codes,
-            index=0,
-            format_func=_lang_label,
-            help="Language of the audio. Auto-detect lets Whisper guess it.",
-        )
-        language = None if choice == "auto" else choice
+        eng = ENGINES[engine]
+        model = next(iter(eng.models))
+        st.caption(f"Model: **{model}** — {eng.models[model]}")
+        if eng.languages is None:
+            st.selectbox(
+                "Language",
+                ["auto"],
+                format_func=lambda c: "Auto · 25 European languages",
+                disabled=True,
+                help="Parakeet detects the spoken language automatically.",
+            )
+            language = None
+        else:
+            lang_codes = ["auto"] + sorted(eng.languages, key=lambda c: eng.languages[c])
+            choice = st.selectbox(
+                "Language",
+                lang_codes,
+                index=0,
+                format_func=lambda c: (
+                    "Auto-detect" if c == "auto" else f"{eng.languages[c]} ({c})"
+                ),
+                help="Language of the audio, or auto-detect.",
+            )
+            language = None if choice == "auto" else choice
 
     diarize = st.checkbox(
         "Identify speakers (diarization)",
@@ -679,117 +783,118 @@ with st.sidebar:
         end = float(st.number_input("End (s)", 1, 36000, 120, step=5))
         duration = max(0.0, end - start)
 
-    beam_choice = st.selectbox(
-        "Beam size",
-        ["Auto", 1, 2, 3, 4, 5],
-        index=0,
-        help="Higher = more accurate but slower. Auto = 1 on CPU, 5 on GPU.",
-    )
-    beam_size = None if beam_choice == "Auto" else int(beam_choice)
-    if beam_choice == "Auto":
-        st.caption(f"Auto → beam size {auto_beam_size(device)} on this {device}.")
-    vad_filter = st.checkbox("VAD filter (skip silence)", value=True)
-    if resolved_backend == "mlx":
-        st.caption("ℹ️ Beam size and VAD filter apply to faster-whisper only.")
-
-    with st.expander("Advanced Whisper parameters", expanded=False):
-        temperature_label = st.selectbox(
-            "Temperature",
-            list(TEMPERATURE_PRESETS),
+    if engine == "whisper":
+        beam_choice = st.selectbox(
+            "Beam size",
+            ["Auto", 1, 2, 3, 4, 5],
             index=0,
-            help="0.0 is most stable. The fallback schedule retries at higher "
-            "temperatures when decoding looks unreliable.",
+            help="Higher = more accurate but slower. Auto = 1 on CPU, 5 on GPU.",
         )
-        temperature = TEMPERATURE_PRESETS[temperature_label]
-        condition_on_previous_text = st.checkbox(
-            "Condition on previous text",
-            value=True,
-            help="Keeps context between chunks. Turn off if Whisper repeats text "
-            "or carries a bad phrase through the transcript.",
-        )
-        initial_prompt_text = st.text_area(
-            "Initial prompt",
-            value="",
-            height=80,
-            placeholder="Names, jargon, spelling hints...",
-            help="Optional context passed to Whisper before transcription starts.",
-        )
-        initial_prompt = initial_prompt_text.strip() or None
-
-        chunk_length = int(
-            st.slider(
-                "Chunk length (s)",
-                min_value=15,
-                max_value=120,
-                value=60,
-                step=15,
-                help="Longer chunks preserve more context; shorter chunks can feel "
-                "more responsive and use less memory.",
-            )
-        )
-        compression_ratio_threshold = float(
-            st.number_input(
-                "Compression ratio threshold",
-                min_value=0.0,
-                max_value=10.0,
-                value=2.4,
-                step=0.1,
-                help="Rejects overly repetitive decoded text above this ratio.",
-            )
-        )
-        log_prob_threshold = float(
-            st.number_input(
-                "Log probability threshold",
-                min_value=-10.0,
-                max_value=0.0,
-                value=-1.0,
-                step=0.1,
-                help="Rejects low-confidence decoded text below this average log probability.",
-            )
-        )
-        no_speech_threshold = float(
-            st.slider(
-                "No-speech threshold",
-                min_value=0.0,
-                max_value=1.0,
-                value=0.6,
-                step=0.05,
-                help="Higher values make Whisper more willing to skip silent segments.",
-            )
-        )
-        use_hallucination_guard = st.checkbox(
-            "Hallucination silence guard",
-            value=False,
-            help="Skips likely hallucinated output after long silence. Useful for "
-            "music, noise, or sparse speech.",
-        )
-        hallucination_silence_threshold = (
-            float(
-                st.slider(
-                    "Silence guard threshold (s)",
-                    min_value=0.5,
-                    max_value=10.0,
-                    value=2.0,
-                    step=0.5,
-                    disabled=not use_hallucination_guard,
-                )
-            )
-            if use_hallucination_guard
-            else None
-        )
+        beam_size = None if beam_choice == "Auto" else int(beam_choice)
+        if beam_choice == "Auto":
+            st.caption(f"Auto → beam size {auto_beam_size(device)} on this {device}.")
+        vad_filter = st.checkbox("VAD filter (skip silence)", value=True)
         if resolved_backend == "mlx":
-            batch_size = 8
-        else:
-            batch_size = int(
+            st.caption("ℹ️ Beam size and VAD filter apply to faster-whisper only.")
+
+        with st.expander("Advanced Whisper parameters", expanded=False):
+            temperature_label = st.selectbox(
+                "Temperature",
+                list(TEMPERATURE_PRESETS),
+                index=0,
+                help="0.0 is most stable. The fallback schedule retries at higher "
+                "temperatures when decoding looks unreliable.",
+            )
+            temperature = TEMPERATURE_PRESETS[temperature_label]
+            condition_on_previous_text = st.checkbox(
+                "Condition on previous text",
+                value=True,
+                help="Keeps context between chunks. Turn off if Whisper repeats text "
+                "or carries a bad phrase through the transcript.",
+            )
+            initial_prompt_text = st.text_area(
+                "Initial prompt",
+                value="",
+                height=80,
+                placeholder="Names, jargon, spelling hints...",
+                help="Optional context passed to Whisper before transcription starts.",
+            )
+            initial_prompt = initial_prompt_text.strip() or None
+
+            chunk_length = int(
                 st.slider(
-                    "Batch size",
-                    min_value=1,
-                    max_value=32,
-                    value=8,
-                    step=1,
-                    help="Higher can be faster on GPU and use more memory.",
+                    "Chunk length (s)",
+                    min_value=15,
+                    max_value=120,
+                    value=60,
+                    step=15,
+                    help="Longer chunks preserve more context; shorter chunks can feel "
+                    "more responsive and use less memory.",
                 )
             )
+            compression_ratio_threshold = float(
+                st.number_input(
+                    "Compression ratio threshold",
+                    min_value=0.0,
+                    max_value=10.0,
+                    value=2.4,
+                    step=0.1,
+                    help="Rejects overly repetitive decoded text above this ratio.",
+                )
+            )
+            log_prob_threshold = float(
+                st.number_input(
+                    "Log probability threshold",
+                    min_value=-10.0,
+                    max_value=0.0,
+                    value=-1.0,
+                    step=0.1,
+                    help="Rejects low-confidence decoded text below this average log probability.",
+                )
+            )
+            no_speech_threshold = float(
+                st.slider(
+                    "No-speech threshold",
+                    min_value=0.0,
+                    max_value=1.0,
+                    value=0.6,
+                    step=0.05,
+                    help="Higher values make Whisper more willing to skip silent segments.",
+                )
+            )
+            use_hallucination_guard = st.checkbox(
+                "Hallucination silence guard",
+                value=False,
+                help="Skips likely hallucinated output after long silence. Useful for "
+                "music, noise, or sparse speech.",
+            )
+            hallucination_silence_threshold = (
+                float(
+                    st.slider(
+                        "Silence guard threshold (s)",
+                        min_value=0.5,
+                        max_value=10.0,
+                        value=2.0,
+                        step=0.5,
+                        disabled=not use_hallucination_guard,
+                    )
+                )
+                if use_hallucination_guard
+                else None
+            )
+            if resolved_backend == "mlx":
+                batch_size = 8
+            else:
+                batch_size = int(
+                    st.slider(
+                        "Batch size",
+                        min_value=1,
+                        max_value=32,
+                        value=8,
+                        step=1,
+                        help="Higher can be faster on GPU and use more memory.",
+                    )
+                )
 
 tab_upload, tab_path = st.tabs(["📤 Upload file", "📁 Local path"])
 input_path: str | None = None
@@ -829,7 +934,13 @@ with tab_path:
         else:
             st.error("File not found.")
 
-run = st.button("▶️ Transcribe", type="primary", disabled=input_path is None)
+run = st.button(
+    "▶️ Transcribe", type="primary", disabled=input_path is None or not engine_ok
+)
+if input_path is not None and not engine_ok:
+    st.warning(
+        f"Install **{ENGINES[engine].label}** first: `{engine_install_hint(engine)}`"
+    )
 
 
 def _player_src(info: tuple) -> str | None:
@@ -890,6 +1001,7 @@ if run and input_path:
         input_path=input_path,
         start=start,
         duration=duration,
+        engine=engine,
         whisper_model=model,
         language=language,
         diarize=diarize,
@@ -913,26 +1025,93 @@ if run and input_path:
     status = st.status("Working…", expanded=True)
     bar = st.progress(0.0, text="Preparing…")
 
-    def _on_progress(stage: str, frac: float, eta: float | None) -> None:
-        if "no live progress" in stage:
-            bar.empty()
-            status.write(
-                "⏳ Transcribing with MLX — this runs in one shot, so there's no "
-                "live %. The spinner above means it's still working."
+    # The pipeline blocks for minutes between its per-chunk callbacks, so run it
+    # in a worker thread and let the main thread repaint the bar on a timer. That
+    # keeps the elapsed clock ticking instead of only updating when % changes.
+    lock = threading.Lock()
+    shared: dict[str, object] = {"stage": None, "frac": 0.0, "eta": None, "oneshot": None, "logs": []}
+
+    def _log_cb(msg: str) -> None:
+        with lock:
+            shared["logs"].append(msg)  # type: ignore[attr-defined]
+
+    def _progress_cb(stage: str, frac: float, eta: float | None) -> None:
+        with lock:
+            if "no live progress" in stage:
+                shared["oneshot"] = stage
+                return
+            shared["oneshot"] = None
+            shared["stage"] = stage
+            shared["frac"] = min(max(float(frac), 0.0), 1.0)
+            shared["eta"] = eta
+
+    box: dict[str, object] = {}
+
+    def _worker() -> None:
+        try:
+            box["segments"] = run_pipeline(
+                settings, progress=_log_cb, on_progress=_progress_cb
             )
+        except Exception as exc:  # re-raised on the main thread below
+            box["error"] = exc
+
+    timer: dict[str, float | str | None] = {"start": None, "stage": None}
+    ui_state = {"written": 0, "oneshot_shown": False}
+
+    def _refresh() -> None:
+        with lock:
+            stage, frac, eta = shared["stage"], shared["frac"], shared["eta"]
+            oneshot = shared["oneshot"]
+            new_logs = shared["logs"][ui_state["written"]:]  # type: ignore[index]
+            ui_state["written"] = len(shared["logs"])  # type: ignore[arg-type]
+        for msg in new_logs:
+            status.write(msg)
+        if oneshot is not None:
+            if not ui_state["oneshot_shown"]:
+                bar.empty()
+                status.write(
+                    f"⏳ {str(oneshot).replace(', no live progress', '')} — this runs "
+                    "in one shot, so there's no live %. The spinner above means it's "
+                    "still working."
+                )
+                ui_state["oneshot_shown"] = True
             return
-        frac = min(max(float(frac), 0.0), 1.0)
-        label = f"{stage}… {int(frac * 100)}%"
-        if eta:
-            label += f" • ~{format_eta(eta)} left"
-        bar.progress(frac, text=label)
+        if stage is None:
+            return
+        now = time.monotonic()
+        # Start the clock when a new stage begins; keep it running across the
+        # whole stage (frac sits at 0 for the entire first chunk). Key on the
+        # text before any " (…)" suffix so a live byte readout that changes
+        # every tick (e.g. "Downloading model (1.4 GB / 2.4 GB)") doesn't keep
+        # resetting the elapsed clock.
+        stage_key = str(stage).split(" (", 1)[0]
+        if timer["stage"] != stage_key or timer["start"] is None:
+            timer["start"], timer["stage"] = now, stage_key  # type: ignore[assignment]
+        elapsed = now - float(timer["start"])  # type: ignore[arg-type]
+        if eta is not None:
+            remaining: float | None = float(eta)  # type: ignore[arg-type]
+        elif float(frac) > 0.02:  # type: ignore[arg-type]
+            remaining = elapsed * (1.0 - float(frac)) / float(frac)  # type: ignore[arg-type]
+        else:
+            remaining = None
+        label = f"{stage}… {int(float(frac) * 100)}% • {format_duration(elapsed)} elapsed"  # type: ignore[arg-type]
+        if remaining is not None:
+            label += f" / ~{format_duration(remaining)} left"
+        bar.progress(float(frac), text=label)  # type: ignore[arg-type]
+
+    worker = threading.Thread(target=_worker, daemon=True)
+    worker.start()
 
     try:
-        segments = run_pipeline(
-            settings,
-            progress=lambda m: status.write(m),
-            on_progress=_on_progress,
-        )
+        while worker.is_alive():
+            _refresh()
+            time.sleep(0.5)
+        worker.join()
+        _refresh()  # flush any final logs / progress
+
+        if "error" in box:
+            raise box["error"]  # type: ignore[misc]
+        segments = box.get("segments") or []
         bar.empty()
         status.update(label="Done", state="complete", expanded=False)
         st.session_state.pop("speaker_aliases", None)
