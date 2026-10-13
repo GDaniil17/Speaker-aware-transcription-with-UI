@@ -40,6 +40,8 @@ dependencies = [
 # Alternative local ASR engines. Installed separately because their deps are
 # heavy and version-pinned, and may conflict with each other or the pinned
 # torch/pyannote — use a dedicated venv per engine if resolution fails.
+# Parakeet itself runs on onnx-asr (core); these add faster backends: NeMo for
+# CUDA GPUs, parakeet-mlx for the Apple Silicon GPU.
 parakeet = ["nemo_toolkit[asr]>=2.0"]
 parakeet-mlx = [
     "parakeet-mlx>=0.3; sys_platform == 'darwin' and platform_machine == 'arm64'",

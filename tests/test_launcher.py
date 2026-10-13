@@ -134,7 +134,7 @@ def test_full_setup_syncs_the_project_and_creates_env_file(tmp_path):
     launch(machine, "--full")
 
     calls = machine["log"].read_text()
-    assert "uv sync --inexact" in calls
+    assert "uv sync --inexact --extra qwen3-asr --extra sensevoice" in calls
     assert "launch-full run --no-sync streamlit run app.py" in calls
     assert "--server.port 8501" in calls
     assert "uv venv" not in calls

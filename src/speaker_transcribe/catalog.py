@@ -234,17 +234,30 @@ SENSEVOICE_MODEL = "SenseVoiceSmall"
 
 # repo ids the engines download from HuggingFace
 PARAKEET_REPOS = {
-    "mlx": "mlx-community/parakeet-tdt-0.6b-v3",
-    "nemo": "nvidia/parakeet-tdt-0.6b-v3",
+    "onnx": "istupakov/parakeet-tdt-0.6b-v3-onnx",  # the default: onnx-asr, any OS
+    "mlx": "mlx-community/parakeet-tdt-0.6b-v3",  # optional parakeet-mlx (Apple GPU)
+    "nemo": "nvidia/parakeet-tdt-0.6b-v3",  # optional NeMo (CUDA)
 }
+# Parakeet's name in onnx-asr and the files it loads from PARAKEET_REPOS["onnx"].
+PARAKEET_ONNX_MODEL = "nemo-parakeet-tdt-0.6b-v3"
+PARAKEET_ONNX_FILES = [
+    "config.json",
+    "vocab.txt",
+    "encoder-model.int8.onnx",
+    "decoder_joint-model.int8.onnx",
+]
 QWEN3_ASR_REPO = "Qwen/Qwen3-ASR-1.7B"
 QWEN3_ALIGNER_REPO = "Qwen/Qwen3-ForcedAligner-0.6B"
 SENSEVOICE_REPO = "FunAudioLLM/SenseVoiceSmall"
-SENSEVOICE_VAD_REPO = "funasr/fsmn-vad"
 
-# GigaAM (Sber) exported to ONNX for onnx-asr, plus Silero VAD that cuts long
-# audio into the <=20 s pieces the model accepts. int8 weights: a quarter of the
-# size, same text in practice. The v3 "e2e" models add punctuation, capitals and
+# Silero VAD, which cuts long audio into the <=20 s pieces the ONNX models
+# (GigaAM, Parakeet) accept, and their int8 weights: a quarter of the size, same
+# text in practice.
+VAD_REPO = "istupakov/silero-vad-onnx"
+VAD_FILES = ["config.json", "silero_vad.onnx"]
+ONNX_QUANTIZATION = "int8"
+
+# GigaAM (Sber) exported to ONNX for onnx-asr. The v3 "e2e" models add punctuation, capitals and
 # number normalisation; the others write lowercase words only. The first model
 # is the default.
 GIGAAM_VERSIONS: dict[str, str] = {
@@ -263,8 +276,6 @@ GIGAAM_REPOS: dict[str, str] = {
     "v3": "istupakov/gigaam-v3-onnx",
     "v2": "istupakov/gigaam-v2-onnx",
 }
-GIGAAM_VAD_REPO = "istupakov/silero-vad-onnx"
-GIGAAM_QUANTIZATION = "int8"
 # Files each model needs from its repo (fnmatch patterns, as onnx-asr names them).
 GIGAAM_FILES: dict[str, list[str]] = {
     "gigaam-v3-e2e-rnnt": ["config.json", "v3_e2e_rnnt_vocab.txt", "v3_e2e_rnnt_*.int8.onnx"],
@@ -274,7 +285,6 @@ GIGAAM_FILES: dict[str, list[str]] = {
     "gigaam-v2-rnnt": ["config.json", "v2_vocab.txt", "v2_rnnt_*.int8.onnx"],
     "gigaam-v2-ctc": ["config.json", "v2_vocab.txt", "v2_ctc.int8.onnx"],
 }
-GIGAAM_VAD_FILES = ["config.json", "silero_vad.onnx"]
 
 
 @dataclass(frozen=True)
@@ -301,11 +311,13 @@ ENGINES: dict[str, Engine] = {
     "parakeet": Engine(
         key="parakeet",
         label="Parakeet (NVIDIA)",
-        description="parakeet-tdt-0.6b-v3 · 25 European languages, auto-detected.",
+        description="parakeet-tdt-0.6b-v3 · 25 European languages, auto-detected. "
+        "Runs on ONNX out of the box; parakeet-mlx (Apple GPU) or NeMo (CUDA) if installed.",
         models={PARAKEET_MODEL: "25 European languages · fast, auto language detect"},
         languages=None,
-        # resolved per platform in engine_install.engine_install_extra
-        install_extra="parakeet",
+        # onnx-asr is a core dependency; the parakeet / parakeet-mlx extras only
+        # add faster backends
+        install_extra="",
     ),
     "qwen3-asr": Engine(
         key="qwen3-asr",
@@ -379,7 +391,7 @@ MODEL_GUIDANCE: dict[str, list[tuple[str, str, str]]] = {
         (
             "Parakeet (MLX)",
             "parakeet-tdt-0.6b-v3",
-            "Fast EU-language transcription via parakeet-mlx (avoids heavy NeMo).",
+            "Fast EU-language transcription; faster still with parakeet-mlx on the GPU.",
         ),
         (
             "SenseVoice",

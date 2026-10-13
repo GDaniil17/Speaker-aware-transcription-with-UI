@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+import time
+import unicodedata
 from collections.abc import Iterator
 from pathlib import Path
 
-from speaker_transcribe.audio import wav_duration
-from speaker_transcribe.catalog import SENSEVOICE_LANGUAGES, SENSEVOICE_REPO, SENSEVOICE_VAD_REPO
+from speaker_transcribe.audio import read_wav_samples
+from speaker_transcribe.catalog import SENSEVOICE_LANGUAGES, SENSEVOICE_REPO, VAD_FILES, VAD_REPO
 from speaker_transcribe.config import Settings
 from speaker_transcribe.engines.common import (
     ProgressBarFn,
@@ -15,8 +17,38 @@ from speaker_transcribe.engines.common import (
     log,
     module_available,
 )
+from speaker_transcribe.engines.onnx import SAMPLE_RATE, speech_pieces
 from speaker_transcribe.hub import ensure_repo_downloaded
-from speaker_transcribe.transcript import TranscriptSegment, emit_segment, group_words
+from speaker_transcribe.transcript import TranscriptSegment, split_by_speaker
+
+
+def _is_punctuation(text: str) -> bool:
+    return all(unicodedata.category(c).startswith("P") for c in text)
+
+
+def timed_words(
+    words: list[str], stamps: list[list[int]], offset: float
+) -> list[tuple[float, float, str]]:
+    """SenseVoice `words` and `timestamp` ([start_ms, end_ms]) as (start, end, word).
+
+    FunASR returns whole words, but punctuation and the parts of a contraction
+    come as separate entries ("we", "'", "re", ","); those are joined back onto
+    the word before them. CJK text comes one character per entry.
+    """
+    out: list[tuple[float, float, str]] = []
+    glue_next = False
+    for word, stamp in zip(words, stamps, strict=False):
+        word = str(word).replace("▁", " ").strip()
+        if not word or not stamp or len(stamp) < 2:
+            continue
+        start, end = offset + stamp[0] / 1000.0, offset + stamp[1] / 1000.0
+        if out and (glue_next or _is_punctuation(word)):
+            prev_start, _, prev_word = out[-1]
+            out[-1] = (prev_start, end, prev_word + word)
+        else:
+            out.append((start, end, word))
+        glue_next = word in ("'", "’")
+    return out
 
 
 def transcribe(
@@ -27,11 +59,10 @@ def transcribe(
     progress: ProgressFn | None,
     on_progress: ProgressBarFn | None = None,
 ) -> Iterator[TranscriptSegment]:
-    """Transcribe with FunAudioLLM SenseVoiceSmall via FunASR.
+    """Transcribe with SenseVoiceSmall, one VAD piece (<=20 s) at a time.
 
-    SenseVoice covers 5 languages (zh/yue/en/ja/ko) and returns word-level
-    CTC-alignment timestamps, which are grouped into readable segments before
-    speaker attribution.
+    Fed long stretches at once (FunASR's own VAD merges up to ~30 s), the model
+    drops whole phrases; short pieces come back complete, with punctuation.
     """
     if not module_available("funasr"):
         raise RuntimeError(
@@ -39,96 +70,42 @@ def transcribe(
             "Install it with: uv sync --inexact --extra sensevoice"
         )
     from funasr import AutoModel
+    from funasr.utils.postprocess_utils import rich_transcription_postprocess
 
     log(progress, "Loading SenseVoice model…")
     ensure_repo_downloaded(SENSEVOICE_REPO, on_progress)
-    ensure_repo_downloaded(SENSEVOICE_VAD_REPO, on_progress)
-    if on_progress:
-        on_progress("Transcribing (SenseVoice, no live progress)", 0.0, None)
+    ensure_repo_downloaded(VAD_REPO, on_progress, VAD_FILES)
     model = cached_model(
         ("sensevoice", SENSEVOICE_REPO),
-        lambda: AutoModel(
-            model=SENSEVOICE_REPO,
-            vad_model=SENSEVOICE_VAD_REPO,
-            vad_kwargs={"max_single_segment_time": 30000},
-            hub="hf",
-            disable_update=True,
-        ),
+        lambda: AutoModel(model=SENSEVOICE_REPO, hub="hf", disable_update=True),
     )
-
     language = settings.language if settings.language in SENSEVOICE_LANGUAGES else "auto"
-    log(progress, "Transcribing with SenseVoice…")
-    res = model.generate(
-        input=str(wav_path),
-        cache={},
-        language=language,
-        use_itn=True,
-        batch_size_s=60,
-        merge_vad=True,
-        merge_length_s=15,
-        output_timestamp=True,
-    )
 
-    first = res[0] if res else {}
-    words = _merge_subwords(_sensevoice_words(first))
-    if words:
-        for start, end, text in group_words(words):
-            seg = emit_segment(start, end, text, diar, sp_map)
-            if seg:
-                yield seg
-    elif first.get("text"):
-        # No timestamps came back — emit the whole utterance as one segment.
-        from funasr.utils.postprocess_utils import rich_transcription_postprocess
+    samples = read_wav_samples(wav_path)
+    if on_progress:
+        on_progress("Transcribing (finding speech)", 0.0, None)
+    spans = speech_pieces(samples)
+    log(progress, f"Transcribing {len(spans)} speech piece(s) with SenseVoice…")
 
-        text = rich_transcription_postprocess(first["text"])
-        seg = emit_segment(0.0, wav_duration(wav_path), text, diar, sp_map)
-        if seg:
-            yield seg
+    started = time.monotonic()
+    for done, (lo, hi) in enumerate(spans, 1):
+        result = model.generate(
+            input=samples[lo:hi],
+            cache={},
+            language=language,
+            use_itn=True,
+            output_timestamp=True,
+        )
+        first = result[0] if result else {}
+        text = rich_transcription_postprocess(first.get("text") or "").strip()
+        if text:
+            start, end = lo / SAMPLE_RATE, hi / SAMPLE_RATE
+            words = timed_words(first.get("words") or [], first.get("timestamp") or [], start)
+            yield from split_by_speaker(start, end, text, words, diar, sp_map)
+        if on_progress:
+            frac = done / len(spans)
+            elapsed = time.monotonic() - started
+            on_progress("Transcribing", frac, elapsed / frac - elapsed)
 
     if on_progress:
         on_progress("Transcribing", 1.0, 0.0)
-
-
-def _sensevoice_words(result: dict) -> list[tuple[float, float, str]]:
-    """Pair SenseVoice `words` with `timestamp` ([start_ms, end_ms]) as second tuples."""
-    words = result.get("words") or []
-    stamps = result.get("timestamp") or []
-    out: list[tuple[float, float, str]] = []
-    for token, ts in zip(words, stamps, strict=False):
-        if not ts or len(ts) < 2:
-            continue
-        out.append((ts[0] / 1000.0, ts[1] / 1000.0, str(token)))
-    return out
-
-
-def _is_cjk(text: str) -> bool:
-    """True if the token holds CJK script, which SenseVoice emits one char per
-    token *without* a `▁` boundary marker (unlike Latin subword pieces)."""
-    return any(
-        "　" <= c <= "〿"  # CJK symbols & punctuation (。、…)
-        or "぀" <= c <= "ヿ"  # hiragana + katakana
-        or "㐀" <= c <= "鿿"  # CJK unified ideographs
-        or "가" <= c <= "힣"  # hangul syllables
-        or "＀" <= c <= "￯"  # fullwidth forms (！？etc.)
-        for c in text
-    )
-
-
-def _merge_subwords(tokens: list[tuple[float, float, str]]) -> list[tuple[float, float, str]]:
-    """Join SentencePiece subwords into words (a `▁` marks a new word boundary).
-
-    CJK languages have no `▁` markers — each character is its own token — so
-    those stay separate; only Latin subword pieces (no `▁`, no CJK) get joined
-    onto the previous word.
-    """
-    merged: list[list] = []
-    for start, end, text in tokens:
-        continuation = (
-            merged and not text.startswith("▁") and not _is_cjk(text) and not _is_cjk(merged[-1][2])
-        )
-        if continuation:
-            merged[-1][1] = end
-            merged[-1][2] += text
-        else:
-            merged.append([start, end, text.lstrip("▁")])
-    return [(start, end, text) for start, end, text in merged if text.strip()]

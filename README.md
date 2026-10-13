@@ -186,19 +186,19 @@ to *Settings* changes the interface language only, not the recording language.
 
 ## Engines and models
 
-| Engine | Model | Languages | Install (full mode) |
+| Engine | Model | Languages | Full mode (`--full`) |
 | --- | --- | --- | --- |
 | **Whisper** | `tiny` … `large-v3`, `large-v3-turbo`, `distil-*` | 99, multilingual | included |
-| **Parakeet** (NVIDIA) | `parakeet-tdt-0.6b-v3` | 25 European, auto-detected | `uv sync --inexact --extra parakeet` (Apple Silicon: `--extra parakeet-mlx`) |
-| **Qwen3-ASR** | `Qwen3-ASR-1.7B` + forced aligner | 30 | `uv sync --inexact --extra qwen3-asr` |
-| **SenseVoice** | `SenseVoiceSmall` | Chinese, Cantonese, English, Japanese, Korean | `uv sync --inexact --extra sensevoice` |
+| **Parakeet** (NVIDIA) | `parakeet-tdt-0.6b-v3` | 25 European, auto-detected | included |
+| **Qwen3-ASR** | `Qwen3-ASR-1.7B` + forced aligner | 30 | included |
+| **SenseVoice** | `SenseVoiceSmall` | Chinese, Cantonese, English, Japanese, Korean | included |
 | **GigaAM v3** (Sber) | `gigaam-v3-e2e-rnnt`, `gigaam-v3-e2e-ctc`, `gigaam-v3-rnnt`, `gigaam-v3-ctc` | Russian | included |
 | **GigaAM v2** (Sber) | `gigaam-v2-rnnt`, `gigaam-v2-ctc` | Russian | included |
 
-In full mode, the sidebar offers an **Install engine** button for missing engines.
-On macOS/Linux, `make install-all` installs every engine at once. Optional engines
-pull heavy, version-pinned dependencies; if they conflict, install one engine at a
-time.
+`./run.sh --full` / `run.bat --full` installs every engine. If you set the project
+up with a plain `uv sync` instead, Qwen3-ASR and SenseVoice are extras: add them with
+`uv sync --inexact --extra qwen3-asr --extra sensevoice`, or with the **Install
+engine** button the sidebar shows for a missing engine.
 
 | Your hardware | Good picks |
 | --- | --- |
@@ -210,7 +210,11 @@ Notes:
 
 - **Speed:** on an M-series Mac, Whisper `large-v3-turbo` handles an hour of audio in
   a few minutes. On an older CPU, try `small` first.
-- **Parakeet** detects the language itself, so the language selector is disabled.
+- **Parakeet** detects the language itself, so the language selector is disabled. It
+  runs on the CPU through ONNX out of the box (~670 MB, about 2 s for a minute of
+  audio on an M-series Mac). Optional faster backends: `uv sync --inexact --extra
+  parakeet-mlx` for the Apple Silicon GPU, or `--extra parakeet` (NVIDIA NeMo, several
+  GB) for CUDA. The sidebar shows which one is in use.
 - **GigaAM**: after picking the engine, choose **GigaAM version** (v3 or v2), then
   the model. The default, `gigaam-v3-e2e-rnnt`, writes punctuation, capitals and
   digits ("15 марта в 10:00"). The other v3 models and both v2 models write lowercase

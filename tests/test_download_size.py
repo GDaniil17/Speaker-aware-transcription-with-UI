@@ -6,7 +6,7 @@ import pytest
 
 from speaker_transcribe import hub
 from speaker_transcribe import model_downloads as downloads
-from speaker_transcribe.catalog import GIGAAM_REPOS, GIGAAM_VAD_REPO
+from speaker_transcribe.catalog import GIGAAM_REPOS, VAD_REPO
 from speaker_transcribe.ui import formatting
 
 
@@ -57,13 +57,13 @@ def test_failed_lookup_is_retried_only_after_a_while(monkeypatch):
 
 
 def test_download_size_skips_snapshots_already_cached(monkeypatch):
-    sizes = {GIGAAM_REPOS["v3"]: 230_000_000, GIGAAM_VAD_REPO: 2_000_000}
+    sizes = {GIGAAM_REPOS["v3"]: 230_000_000, VAD_REPO: 2_000_000}
     monkeypatch.setattr(downloads, "remote_size", lambda repo, patterns=None: sizes[repo])
     cached: set[str] = set()
     monkeypatch.setattr(downloads, "repo_files_cached", lambda repo, patterns: repo in cached)
 
     assert downloads.download_size("gigaam", "gigaam-v3-e2e-rnnt") == 232_000_000
-    cached.add(GIGAAM_VAD_REPO)  # e.g. shared with GigaAM v2, downloaded earlier
+    cached.add(VAD_REPO)  # e.g. shared with GigaAM v2, downloaded earlier
     assert downloads.download_size("gigaam", "gigaam-v3-e2e-rnnt") == 230_000_000
     cached.add(GIGAAM_REPOS["v3"])
     assert downloads.download_size("gigaam", "gigaam-v3-e2e-rnnt") == 0
@@ -74,7 +74,7 @@ def test_download_size_is_unknown_when_any_lookup_fails(monkeypatch):
     monkeypatch.setattr(
         downloads,
         "remote_size",
-        lambda repo, patterns=None: None if repo == GIGAAM_VAD_REPO else 1,
+        lambda repo, patterns=None: None if repo == VAD_REPO else 1,
     )
     assert downloads.download_size("gigaam", "gigaam-v2-ctc") is None
 

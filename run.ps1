@@ -106,8 +106,9 @@ function Get-StreamlitArgs([string]$port) {
 # --- full setup: the locked project environment in .venv -----------------------
 if ($full) {
     Write-Host 'Preparing the full environment (.venv): Whisper, speaker identification, all engines...'
-    # --inexact keeps optional engines installed earlier from the UI.
-    Invoke-Checked $uv @('sync', '--inexact') 'Installing the project'
+    # Every engine: Parakeet and GigaAM are core, Qwen3-ASR and SenseVoice are
+    # extras. --inexact keeps anything else installed earlier.
+    Invoke-Checked $uv @('sync', '--inexact', '--extra', 'qwen3-asr', '--extra', 'sensevoice') 'Installing the project'
     if (-not (Test-Path -LiteralPath '.env')) {
         Copy-Item '.env.example' '.env'
         Write-Host 'Created .env. Speaker identification needs a Hugging Face token once: see README.md.'

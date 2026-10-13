@@ -8,9 +8,9 @@ from speaker_transcribe import model_downloads as downloads
 from speaker_transcribe.catalog import (
     GIGAAM_FILES,
     GIGAAM_REPOS,
-    GIGAAM_VAD_REPO,
     QWEN3_ALIGNER_REPO,
     QWEN3_ASR_REPO,
+    VAD_REPO,
 )
 
 
@@ -27,7 +27,7 @@ def test_gigaam_fetches_only_selected_weights_and_vad():
     repos = downloads.model_repos("gigaam", "gigaam-v2-ctc")
     assert repos == [
         (GIGAAM_REPOS["v2"], GIGAAM_FILES["gigaam-v2-ctc"]),
-        (GIGAAM_VAD_REPO, downloads.GIGAAM_VAD_FILES),
+        (VAD_REPO, downloads.VAD_FILES),
     ]
 
 
@@ -35,7 +35,7 @@ def test_gigaam_v3_downloads_from_the_v3_repo():
     repos = downloads.model_repos("gigaam", "gigaam-v3-e2e-rnnt")
     assert repos == [
         (GIGAAM_REPOS["v3"], GIGAAM_FILES["gigaam-v3-e2e-rnnt"]),
-        (GIGAAM_VAD_REPO, downloads.GIGAAM_VAD_FILES),
+        (VAD_REPO, downloads.VAD_FILES),
     ]
 
 

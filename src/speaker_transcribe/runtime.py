@@ -94,11 +94,32 @@ def hardware_profile() -> str:
     return "cpu"
 
 
-def parakeet_available() -> bool:
-    """True when a Parakeet backend is importable (MLX on Apple Silicon, else NeMo)."""
+def parakeet_backend() -> str | None:
+    """Backend Parakeet runs on: the fastest one installed, or None.
+
+    'mlx' (parakeet-mlx, Apple Silicon GPU) and 'nemo' (NVIDIA NeMo, CUDA) are
+    optional extras; 'onnx' (onnx-asr, CPU) is a core dependency, so Parakeet
+    works without installing anything.
+    """
     if is_apple_silicon() and importlib.util.find_spec("parakeet_mlx") is not None:
-        return True
-    return importlib.util.find_spec("nemo") is not None
+        return "mlx"
+    if importlib.util.find_spec("nemo") is not None:
+        return "nemo"
+    if importlib.util.find_spec("onnx_asr") is not None:
+        return "onnx"
+    return None
+
+
+PARAKEET_BACKEND_LABELS = {
+    "mlx": "MLX (Apple Silicon GPU)",
+    "nemo": "NeMo",
+    "onnx": "ONNX (CPU)",
+}
+
+
+def parakeet_available() -> bool:
+    """True when some Parakeet backend is installed (always, with the core deps)."""
+    return parakeet_backend() is not None
 
 
 def qwen3_asr_available() -> bool:

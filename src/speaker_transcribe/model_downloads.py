@@ -9,13 +9,13 @@ from dataclasses import dataclass, field
 
 from speaker_transcribe.catalog import (
     GIGAAM_FILES,
-    GIGAAM_VAD_FILES,
-    GIGAAM_VAD_REPO,
+    PARAKEET_ONNX_FILES,
     PARAKEET_REPOS,
     QWEN3_ALIGNER_REPO,
     QWEN3_ASR_REPO,
     SENSEVOICE_REPO,
-    SENSEVOICE_VAD_REPO,
+    VAD_FILES,
+    VAD_REPO,
     gigaam_repo_for,
     mlx_repo_for,
     whisper_repo_for,
@@ -26,7 +26,7 @@ from speaker_transcribe.hub import (
     repo_files_cached,
     repo_in_cache,
 )
-from speaker_transcribe.runtime import is_apple_silicon
+from speaker_transcribe.runtime import parakeet_backend
 
 DownloadProgress = Callable[[str, float, float | None], None]
 
@@ -115,16 +115,18 @@ def model_repos(
         repo = mlx_repo_for(model) if backend == "mlx" else whisper_repo_for(model, backend)
         return [(repo, None)] if repo else []
     if engine == "parakeet":
-        platform = "mlx" if is_apple_silicon() else "nemo"
-        return [(PARAKEET_REPOS[platform], None)]
+        backend = parakeet_backend() or "onnx"
+        if backend == "onnx":
+            return [(PARAKEET_REPOS["onnx"], PARAKEET_ONNX_FILES), (VAD_REPO, VAD_FILES)]
+        return [(PARAKEET_REPOS[backend], None)]
     if engine == "qwen3-asr":
         return [(QWEN3_ASR_REPO, None), (QWEN3_ALIGNER_REPO, None)]
     if engine == "sensevoice":
-        return [(SENSEVOICE_REPO, None), (SENSEVOICE_VAD_REPO, None)]
+        return [(SENSEVOICE_REPO, None), (VAD_REPO, VAD_FILES)]
     if engine == "gigaam":
         return [
             (gigaam_repo_for(model), GIGAAM_FILES[model]),
-            (GIGAAM_VAD_REPO, GIGAAM_VAD_FILES),
+            (VAD_REPO, VAD_FILES),
         ]
     raise ValueError(f"Unknown engine: {engine}")
 

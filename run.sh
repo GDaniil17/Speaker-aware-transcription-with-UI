@@ -108,8 +108,9 @@ streamlit_args() {
 # --- full setup: the locked project environment in .venv -----------------------
 if [ "$full" -eq 1 ]; then
     echo "Preparing the full environment (.venv): Whisper, speaker identification, all engines…"
-    # --inexact keeps optional engines installed earlier from the UI.
-    "$uv_bin" sync --inexact
+    # Every engine: Parakeet and GigaAM are core, Qwen3-ASR and SenseVoice are
+    # extras. --inexact keeps anything else installed earlier (e.g. parakeet-mlx).
+    "$uv_bin" sync --inexact --extra qwen3-asr --extra sensevoice
     if [ ! -f .env ]; then
         cp .env.example .env
         echo "Created .env. Speaker identification needs a Hugging Face token once: see README.md."

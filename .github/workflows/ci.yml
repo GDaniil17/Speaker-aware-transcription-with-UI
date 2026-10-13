@@ -51,3 +51,17 @@ jobs:
           call run.bat --typo < NUL
           if %ERRORLEVEL% NEQ 2 exit /b 1
           exit /b 0
+
+  windows-full-install:
+    # What run.bat --full installs: every engine, PyTorch and pyannote.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - run: uv sync --inexact --extra qwen3-asr --extra sensevoice
+      - name: Every engine imports
+        run: >-
+          uv run --no-sync python -c "import faster_whisper, onnx_asr, funasr, qwen_asr,
+          pyannote.audio; from speaker_transcribe import pipeline, runtime;
+          assert all(runtime.engine_available(e) for e in
+          ('whisper', 'parakeet', 'qwen3-asr', 'sensevoice', 'gigaam')); print('ok')"

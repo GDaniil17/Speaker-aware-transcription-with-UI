@@ -5,7 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from speaker_transcribe import catalog, hub
-from speaker_transcribe.engines.gigaam import merge_spans, token_words
+from speaker_transcribe.engines.onnx import merge_spans, token_words
 from speaker_transcribe.transcript import split_by_speaker
 
 # Weight, vocab and config files published in each GigaAM ONNX repo (int8 only).
@@ -154,7 +154,7 @@ def test_downloaded_files_are_exactly_what_onnx_asr_loads(model):
     downloaded = [
         f for f in published if any(fnmatch.fnmatch(f, p) for p in catalog.GIGAAM_FILES[model])
     ]
-    for pattern in model_class._get_model_files(catalog.GIGAAM_QUANTIZATION).values():
+    for pattern in model_class._get_model_files(catalog.ONNX_QUANTIZATION).values():
         # onnx-asr globs inside the snapshot; with every variant cached it must
         # still find exactly one file per pattern.
         assert len(fnmatch.filter(published, pattern)) == 1, pattern
@@ -165,3 +165,11 @@ def test_pyannote_telemetry_off_by_default():
     import os
 
     assert os.environ["PYANNOTE_METRICS_ENABLED"] == "false"
+
+
+def test_audio_too_short_for_the_vad_has_no_speech():
+    np = pytest.importorskip("numpy")
+    pytest.importorskip("onnx_asr")
+    from speaker_transcribe.engines.onnx import speech_pieces
+
+    assert speech_pieces(np.zeros(256, dtype=np.float32)) == []

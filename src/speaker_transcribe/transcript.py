@@ -66,18 +66,20 @@ def split_by_speaker(
         if seg:
             yield seg
         return
-    run: list[tuple[float, float, str]] = []
-    run_speaker = None
+    runs: list[tuple[str, list[tuple[float, float, str]]]] = []
     for w_start, w_end, word in words:
         speaker = speaker_for(w_start, w_end, diar, sp_map)
         speaker = main if speaker == "Unknown" else speaker
-        if run and speaker != run_speaker:
-            yield TranscriptSegment(run[0][0], run[-1][1], run_speaker, " ".join(w[2] for w in run))
-            run = []
-        run.append((w_start, w_end, word))
-        run_speaker = speaker
-    if run:
-        yield TranscriptSegment(run[0][0], run[-1][1], run_speaker, " ".join(w[2] for w in run))
+        if runs and runs[-1][0] == speaker:
+            runs[-1][1].append((w_start, w_end, word))
+        else:
+            runs.append((speaker, [(w_start, w_end, word)]))
+    if len(runs) == 1:
+        # One speaker throughout: keep the model's own text, punctuation and all.
+        yield TranscriptSegment(start, end, runs[0][0], text)
+        return
+    for speaker, run in runs:
+        yield TranscriptSegment(run[0][0], run[-1][1], speaker, join_tokens([w[2] for w in run]))
 
 
 def join_tokens(tokens: list[str]) -> str:

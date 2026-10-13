@@ -16,7 +16,7 @@ ENV UV_LINK_MODE=copy \
 
 COPY pyproject.toml uv.lock README.md LICENSE ./
 COPY src ./src
-RUN uv sync --no-dev --frozen
+RUN uv sync --no-dev --frozen --extra qwen3-asr --extra sensevoice
 
 COPY app.py ./
 COPY .streamlit ./.streamlit

@@ -11,7 +11,6 @@ from collections.abc import Callable
 from pathlib import Path
 
 from speaker_transcribe.catalog import ENGINES
-from speaker_transcribe.runtime import is_apple_silicon
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 _INSTALL_LOCK = threading.Lock()
@@ -19,10 +18,7 @@ _INSTALL_LOCK = threading.Lock()
 
 def engine_install_extra(engine: str) -> str:
     """The project extra needed for an optional engine, if any."""
-    extra = ENGINES[engine].install_extra
-    if engine == "parakeet" and is_apple_silicon():
-        extra = "parakeet-mlx"
-    return extra
+    return ENGINES[engine].install_extra
 
 
 def engine_install_hint(engine: str) -> str:
@@ -30,7 +26,7 @@ def engine_install_hint(engine: str) -> str:
     extra = engine_install_extra(engine)
     if extra:
         return f"uv sync --inexact --extra {extra}"
-    return "uv sync" if engine == "gigaam" else ""
+    return "uv sync" if engine in ("gigaam", "parakeet") else ""  # onnx-asr is core
 
 
 def install_command(engine: str, project_root: Path = PROJECT_ROOT) -> list[str] | None:

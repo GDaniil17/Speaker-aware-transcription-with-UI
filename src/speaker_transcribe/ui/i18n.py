@@ -166,8 +166,8 @@ RU: dict[str, str] = {
     "Near-large quality at high speed on the Apple GPU.": (
         "Близкое к large качество при высокой скорости на графике Apple."
     ),
-    "Fast EU-language transcription via parakeet-mlx (avoids heavy NeMo).": (
-        "Быстро обрабатывает европейские языки через parakeet-mlx."
+    "Fast EU-language transcription; faster still with parakeet-mlx on the GPU.": (
+        "Быстро распознаёт европейские языки; ещё быстрее с parakeet-mlx на графике."
     ),
     "Good for Chinese, Cantonese, English, Japanese, and Korean audio.": (
         "Подходит для китайского, кантонского, английского, японского и корейского."

@@ -40,6 +40,7 @@ from speaker_transcribe.model_downloads import (
     start_model_download,
 )
 from speaker_transcribe.runtime import (
+    PARAKEET_BACKEND_LABELS,
     describe_runtime,
     detect_backend,
     detect_device,
@@ -47,6 +48,7 @@ from speaker_transcribe.runtime import (
     faster_whisper_available,
     hardware_profile,
     mlx_available,
+    parakeet_backend,
 )
 from speaker_transcribe.ui.formatting import format_duration, format_size
 from speaker_transcribe.ui.i18n import locale_key, progress_text, tr
@@ -252,6 +254,8 @@ def _model_and_language(engine: str, basic_mode: bool) -> tuple[dict[str, object
     else:
         resolved_backend = "auto"
         runtime_label = ENGINES[engine].label
+        if engine == "parakeet" and (parakeet := parakeet_backend()):
+            runtime_label += f" · {PARAKEET_BACKEND_LABELS[parakeet]}"
     st.caption(f"{tr('Transcription')}: **{runtime_label}**")
 
     if engine == "whisper":
