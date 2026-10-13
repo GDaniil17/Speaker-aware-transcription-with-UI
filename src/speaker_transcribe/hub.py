@@ -15,6 +15,43 @@ from speaker_transcribe.catalog import DIARIZATION_MODEL, whisper_repo_for
 ProgressBarFn = Callable[[str, float, float | None], None]
 
 
+# Download sizes looked up on the Hub: {(repo, patterns): (bytes or None, when)}.
+# A size is kept for the life of the process; a failed lookup (offline, Hub
+# down) is retried after _SIZE_RETRY_SECONDS, so an offline UI isn't slowed down
+# by a request on every rerun.
+_SIZES: dict[tuple[str, tuple[str, ...] | None], tuple[int | None, float]] = {}
+_SIZES_LOCK = threading.Lock()
+_SIZE_RETRY_SECONDS = 300.0
+
+
+def remote_size(repo_id: str, patterns: list[str] | None = None) -> int | None:
+    """Bytes a snapshot download of `repo_id` (only `patterns`, if given) fetches.
+
+    None when the Hub cannot be reached. Gated repos report sizes without a token.
+    """
+    key = (repo_id, tuple(patterns) if patterns else None)
+    with _SIZES_LOCK:
+        cached = _SIZES.get(key)
+    if cached is not None:
+        size, when = cached
+        if size is not None or time.monotonic() - when < _SIZE_RETRY_SECONDS:
+            return size
+    try:
+        from huggingface_hub import HfApi
+
+        info = HfApi().model_info(repo_id, files_metadata=True, timeout=10)
+        size: int | None = sum(
+            sibling.size or 0
+            for sibling in info.siblings or []
+            if not patterns or any(fnmatch.fnmatch(sibling.rfilename, p) for p in patterns)
+        )
+    except Exception:
+        size = None
+    with _SIZES_LOCK:
+        _SIZES[key] = (size, time.monotonic())
+    return size
+
+
 def repo_in_cache(repo_id: str) -> bool:
     """True when `repo_id` is already present in the local HuggingFace cache."""
     try:
@@ -73,10 +110,11 @@ def ensure_whisper_model_downloaded(
 
 def _human_bytes(num: float) -> str:
     """Format a byte count as a compact human-readable string (e.g. '1.4 GB')."""
+    # Decimal units, as the Hub lists file sizes (and the UI shows them before a download).
     for unit in ("B", "KB", "MB"):
-        if num < 1024:
+        if num < 1000:
             return f"{num:.0f} {unit}"
-        num /= 1024
+        num /= 1000
     return f"{num:.1f} GB"
 
 

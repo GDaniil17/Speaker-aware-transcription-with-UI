@@ -20,7 +20,12 @@ from speaker_transcribe.catalog import (
     mlx_repo_for,
     whisper_repo_for,
 )
-from speaker_transcribe.hub import ensure_repo_downloaded, repo_files_cached, repo_in_cache
+from speaker_transcribe.hub import (
+    ensure_repo_downloaded,
+    remote_size,
+    repo_files_cached,
+    repo_in_cache,
+)
 from speaker_transcribe.runtime import is_apple_silicon
 
 DownloadProgress = Callable[[str, float, float | None], None]
@@ -131,6 +136,23 @@ def model_is_cached(engine: str, model: str, backend: str = "auto") -> bool:
         repo_files_cached(repo, patterns) if patterns else repo_in_cache(repo)
         for repo, patterns in repos
     )
+
+
+def download_size(engine: str, model: str, backend: str = "auto") -> int | None:
+    """Bytes still to download for the selected model, or None if the Hub is unreachable.
+
+    Snapshots already in the local cache (e.g. a VAD model another engine shares)
+    don't count.
+    """
+    total = 0
+    for repo, patterns in model_repos(engine, model, backend):
+        if repo_files_cached(repo, patterns) if patterns else repo_in_cache(repo):
+            continue
+        size = remote_size(repo, patterns)
+        if size is None:
+            return None
+        total += size
+    return total
 
 
 def download_model(

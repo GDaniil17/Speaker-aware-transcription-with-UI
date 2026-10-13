@@ -33,42 +33,97 @@ SRT, VTT или JSON.
 
 ## Быстрый старт: одна команда
 
-При первом запуске нужен интернет. Заранее ничего устанавливать не нужно: скрипт сам
-скачает [uv](https://docs.astral.sh/uv/) и Python 3.12 в папку проекта. Права
-администратора не нужны, остальная система не затрагивается.
+Одна команда скачивает проект, устанавливает всё нужное и открывает приложение в
+браузере по адресу <http://127.0.0.1:8501>. Заранее ничего ставить не нужно, даже git
+или Python: скрипт сам скачает [uv](https://docs.astral.sh/uv/) и Python 3.12 в папку
+проекта. Права администратора не нужны, остальная система не затрагивается. Первый
+запуск занимает несколько минут.
 
-**macOS / Linux**: откройте Терминал и вставьте:
+Выберите свою систему:
+
+<details open>
+<summary><b>🍎 macOS</b></summary>
+
+Откройте **Терминал** (<kbd>⌘ Пробел</kbd> → наберите «Терминал» → <kbd>Enter</kbd>) и вставьте:
 
 ```bash
-git clone https://github.com/GDaniil17/Speaker-aware-transcription-with-UI.git && cd Speaker-aware-transcription-with-UI && ./run.sh
+curl -fsSL https://github.com/GDaniil17/Speaker-aware-transcription-with-UI/archive/refs/heads/main.tar.gz | tar xz && cd Speaker-aware-transcription-with-UI-main && ./run.sh
 ```
 
-**Windows**: откройте PowerShell и вставьте:
+Это быстрый старт: только Whisper, аккаунт не нужен. Mac с чипом M-серии и macOS 14+
+используют графику, Mac на Intel — процессор. Чтобы включить **определение говорящих и
+все движки**, замените в конце команды `./run.sh` на `./run.sh --full`
+(см. [ниже](#как-включить-определение-говорящих)).
 
-```powershell
-git clone https://github.com/GDaniil17/Speaker-aware-transcription-with-UI.git; cd Speaker-aware-transcription-with-UI; .\run.bat
+**В следующий раз** откройте Терминал и выполните:
+
+```bash
+cd Speaker-aware-transcription-with-UI-main && ./run.sh
 ```
-
-Приложение откроется в браузере по адресу <http://127.0.0.1:8501>. Чтобы остановить
-его, нажмите **Ctrl+C** в терминале. В следующий раз запускайте той же командой
-`./run.sh` или `run.bat`.
-
-<details>
-<summary><b>Нет git?</b> Скачайте ZIP-архив</summary>
-
-1. На GitHub нажмите **Code → Download ZIP** и распакуйте архив.
-2. **Windows:** откройте папку и дважды щёлкните **`run.bat`**.
-   Если появится предупреждение SmartScreen, выберите **Подробнее → Выполнить в любом случае**.
-3. **macOS:** откройте Терминал, наберите `cd ` (с пробелом), перетащите
-   распакованную папку в окно Терминала, нажмите Enter и выполните `bash run.sh`.
-4. **Linux:** откройте терминал в папке проекта и выполните `bash run.sh`.
 
 </details>
 
-Что вы увидите в терминале:
+<details>
+<summary><b>🐧 Linux</b></summary>
+
+Откройте терминал и вставьте:
+
+```bash
+curl -fsSL https://github.com/GDaniil17/Speaker-aware-transcription-with-UI/archive/refs/heads/main.tar.gz | tar xz && cd Speaker-aware-transcription-with-UI-main && ./run.sh
+```
+
+Это быстрый старт: Whisper на процессоре, аккаунт не нужен. Чтобы включить
+**определение говорящих, все движки и видеокарты NVIDIA**, замените в конце команды
+`./run.sh` на `./run.sh --full` (см. [ниже](#как-включить-определение-говорящих)).
+
+Если `curl` не установлен, поставьте его: `sudo apt install curl` в Debian/Ubuntu или
+`sudo dnf install curl` в Fedora. На сервере без рабочего стола откройте адрес с
+другого компьютера через SSH-туннель: `ssh -L 8501:127.0.0.1:8501 ваш-сервер`.
+
+**В следующий раз:**
+
+```bash
+cd Speaker-aware-transcription-with-UI-main && ./run.sh
+```
+
+</details>
+
+<details>
+<summary><b>🪟 Windows</b></summary>
+
+Откройте **PowerShell** (<kbd>Win</kbd> → наберите «PowerShell» → <kbd>Enter</kbd>) и вставьте:
 
 ```text
-$ ./run.sh
+iwr https://github.com/GDaniil17/Speaker-aware-transcription-with-UI/archive/refs/heads/main.zip -OutFile speaker-transcribe.zip -UseBasicParsing; Expand-Archive speaker-transcribe.zip . -Force; cd Speaker-aware-transcription-with-UI-main; .\run.bat
+```
+
+Это быстрый старт: Whisper на процессоре, аккаунт не нужен. Чтобы включить
+**определение говорящих и все движки**, замените в конце команды `.\run.bat` на
+`.\run.bat --full` (см. [ниже](#как-включить-определение-говорящих)).
+
+**В следующий раз** откройте папку `Speaker-aware-transcription-with-UI-main` и дважды
+щёлкните **`run.bat`** или выполните `.\run.bat` в PowerShell из этой папки. Если
+SmartScreen предупредит о файле, выберите **Подробнее → Выполнить в любом случае**.
+
+</details>
+
+<details>
+<summary><b>Удобнее через git?</b></summary>
+
+```bash
+git clone https://github.com/GDaniil17/Speaker-aware-transcription-with-UI.git
+cd Speaker-aware-transcription-with-UI
+./run.sh          # Windows: .\run.bat
+```
+
+Обновление — `git pull`; при следующем запуске доустановится всё, что изменилось.
+
+</details>
+
+Остановить приложение — <kbd>Ctrl</kbd>+<kbd>C</kbd> в окне терминала. При первом
+запуске там будет примерно так:
+
+```text
 Preparing Python 3.12 and the Whisper environment…
 Installing Apple Silicon GPU support (MLX)…
 Starting Whisper large-v3-turbo (mlx). No Hugging Face token needed.
@@ -113,7 +168,8 @@ Mac с чипом M-серии и macOS 14+, а в остальных случа
 <img src="docs/screenshots/settings-sidebar.png" alt="Боковая панель настроек: движок, модель, язык, говорящие и подсказка по выбору модели" width="260" align="right">
 
 1. **Выберите движок и модель** в боковой панели. Whisper `large-v3-turbo` хорошо
-   подходит по умолчанию. В первый раз нажмите **Скачать модель**; прогресс
+   подходит по умолчанию. В первый раз нажмите **Скачать модель**: на кнопке видно,
+   сколько придётся скачать (например, 1,6 ГБ для `large-v3-turbo`), а прогресс
    сохраняется, даже если обновить страницу.
 2. **Укажите язык записи** или оставьте **Определить автоматически**.
 3. **Определять говорящих** (полный режим): при желании задайте минимальное и

@@ -23,8 +23,9 @@ data/
 *.vtt
 out/
 
-# Media copies served to the in-browser preview
-static/
+# Media copies served to the in-browser preview (the folder itself ships empty)
+static/*
+!static/.gitkeep
 
 # OS
 .DS_Store

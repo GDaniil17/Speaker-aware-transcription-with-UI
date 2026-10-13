@@ -39,3 +39,13 @@ def format_total_duration(seconds: float) -> str:
     if remaining_seconds:
         parts.append(f"{remaining_seconds} {second_unit}")
     return " ".join(parts)
+
+
+def format_size(num_bytes: int) -> str:
+    """A download size such as '1.6 GB' or '240 MB' ('1,6 ГБ' in Russian)."""
+    russian = is_russian()
+    if num_bytes >= 1000**3:
+        amount, unit = f"{num_bytes / 1000**3:.1f}", "ГБ" if russian else "GB"
+    else:
+        amount, unit = f"{max(num_bytes / 1000**2, 1):.0f}", "МБ" if russian else "MB"
+    return f"{amount.replace('.', ',') if russian else amount} {unit}"

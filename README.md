@@ -32,42 +32,97 @@ JSON.
 
 ## Quick start: one command
 
-You need an internet connection the first time. Nothing has to be installed
-beforehand: the launcher fetches [uv](https://docs.astral.sh/uv/) and Python 3.12
-into the project folder. It doesn't need administrator rights and doesn't touch the
-rest of your system.
+One command downloads the project, installs everything it needs and opens the app in
+your browser at <http://127.0.0.1:8501>. Nothing has to be installed beforehand, not
+even git or Python: the launcher fetches [uv](https://docs.astral.sh/uv/) and
+Python 3.12 into the project folder. It needs no administrator rights and doesn't
+touch the rest of your system. The first start takes a few minutes.
 
-**macOS / Linux**: open Terminal and paste:
+Pick your system:
+
+<details open>
+<summary><b>🍎 macOS</b></summary>
+
+Open **Terminal** (<kbd>⌘ Space</kbd> → type "Terminal" → <kbd>Enter</kbd>) and paste:
 
 ```bash
-git clone https://github.com/GDaniil17/Speaker-aware-transcription-with-UI.git && cd Speaker-aware-transcription-with-UI && ./run.sh
+curl -fsSL https://github.com/GDaniil17/Speaker-aware-transcription-with-UI/archive/refs/heads/main.tar.gz | tar xz && cd Speaker-aware-transcription-with-UI-main && ./run.sh
 ```
 
-**Windows**: open PowerShell and paste:
+That's the quick start: Whisper only, no account needed. M-series Macs on macOS 14+
+use the GPU; Intel Macs use the CPU. For **speaker identification and every engine**,
+end the command with `./run.sh --full` instead (see [below](#turning-on-speaker-identification)).
 
-```powershell
-git clone https://github.com/GDaniil17/Speaker-aware-transcription-with-UI.git; cd Speaker-aware-transcription-with-UI; .\run.bat
+**Next time**, open Terminal in the same place and run:
+
+```bash
+cd Speaker-aware-transcription-with-UI-main && ./run.sh
 ```
-
-The app opens in your browser at <http://127.0.0.1:8501>. Stop it with **Ctrl+C**
-in the terminal; start it again later with the same `./run.sh` or `run.bat`.
-
-<details>
-<summary><b>No git?</b> Download the ZIP instead</summary>
-
-1. On GitHub, click **Code → Download ZIP** and unzip it.
-2. **Windows:** open the folder and double-click **`run.bat`**.
-   If SmartScreen warns about it, choose **More info → Run anyway**.
-3. **macOS:** open Terminal, type `cd ` (with a space), drag the unzipped folder into
-   the Terminal window, press Enter, then run `bash run.sh`.
-4. **Linux:** open a terminal in the folder and run `bash run.sh`.
 
 </details>
 
-What you'll see in the terminal:
+<details>
+<summary><b>🐧 Linux</b></summary>
+
+Open a terminal and paste:
+
+```bash
+curl -fsSL https://github.com/GDaniil17/Speaker-aware-transcription-with-UI/archive/refs/heads/main.tar.gz | tar xz && cd Speaker-aware-transcription-with-UI-main && ./run.sh
+```
+
+That's the quick start: Whisper on the CPU, no account needed. For **speaker
+identification, every engine and NVIDIA GPU support**, end the command with
+`./run.sh --full` instead (see [below](#turning-on-speaker-identification)).
+
+If `curl` is missing, install it first, e.g. `sudo apt install curl` on Debian/Ubuntu
+or `sudo dnf install curl` on Fedora. On a server without a desktop, open the printed
+address from another machine through an SSH tunnel:
+`ssh -L 8501:127.0.0.1:8501 your-server`.
+
+**Next time:**
+
+```bash
+cd Speaker-aware-transcription-with-UI-main && ./run.sh
+```
+
+</details>
+
+<details>
+<summary><b>🪟 Windows</b></summary>
+
+Open **PowerShell** (<kbd>Win</kbd> → type "PowerShell" → <kbd>Enter</kbd>) and paste:
 
 ```text
-$ ./run.sh
+iwr https://github.com/GDaniil17/Speaker-aware-transcription-with-UI/archive/refs/heads/main.zip -OutFile speaker-transcribe.zip -UseBasicParsing; Expand-Archive speaker-transcribe.zip . -Force; cd Speaker-aware-transcription-with-UI-main; .\run.bat
+```
+
+That's the quick start: Whisper on the CPU, no account needed. For **speaker
+identification and every engine**, end the command with `.\run.bat --full` instead (see
+[below](#turning-on-speaker-identification)).
+
+**Next time**, open the `Speaker-aware-transcription-with-UI-main` folder and
+double-click **`run.bat`**, or run `.\run.bat` from PowerShell in that folder. If
+SmartScreen warns about the file, choose **More info → Run anyway**.
+
+</details>
+
+<details>
+<summary><b>Prefer git?</b></summary>
+
+```bash
+git clone https://github.com/GDaniil17/Speaker-aware-transcription-with-UI.git
+cd Speaker-aware-transcription-with-UI
+./run.sh          # Windows: .\run.bat
+```
+
+Update later with `git pull`; the next start installs whatever changed.
+
+</details>
+
+Stop the app with <kbd>Ctrl</kbd>+<kbd>C</kbd> in the terminal window. What you'll
+see there on the first start:
+
+```text
 Preparing Python 3.12 and the Whisper environment…
 Installing Apple Silicon GPU support (MLX)…
 Starting Whisper large-v3-turbo (mlx). No Hugging Face token needed.
@@ -109,7 +164,8 @@ You only need the token once. After the first run the model is cached in
 <img src="docs/screenshots/settings-sidebar.png" alt="Settings sidebar with engine, model, language, speaker options and the model guide" width="260" align="right">
 
 1. **Pick an engine and a model** in the sidebar. Whisper `large-v3-turbo` is a good
-   default. Click **Download model** the first time; the progress bar survives a page
+   default. Click **Download model** the first time: the button shows how much will be
+   downloaded (e.g. 1.6 GB for `large-v3-turbo`), and the progress bar survives a page
    refresh.
 2. **Choose the recording language**, or leave **Auto-detect** on.
 3. **Identify speakers** (full mode): optionally set the minimum and maximum number

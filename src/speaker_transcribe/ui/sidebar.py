@@ -30,10 +30,11 @@ from speaker_transcribe.chunking import (
 )
 from speaker_transcribe.config import Settings, get_hf_token
 from speaker_transcribe.engine_install import engine_install_hint, install_command, install_engine
-from speaker_transcribe.hub import diarization_model_cached
+from speaker_transcribe.hub import diarization_model_cached, remote_size
 from speaker_transcribe.model_downloads import (
     ModelDownloadTask,
     active_model_download_task,
+    download_size,
     get_model_download_task,
     model_is_cached,
     start_model_download,
@@ -47,7 +48,7 @@ from speaker_transcribe.runtime import (
     hardware_profile,
     mlx_available,
 )
-from speaker_transcribe.ui.formatting import format_duration
+from speaker_transcribe.ui.formatting import format_duration, format_size
 from speaker_transcribe.ui.i18n import locale_key, progress_text, tr
 
 TEMPERATURE_PRESETS: dict[str, float | tuple[float, ...]] = {
@@ -324,12 +325,16 @@ def _model_download(engine: str, model: str, resolved_backend: str, engine_ok: b
     if not engine_ok:
         return False
 
+    size_label = ""  # what still has to be downloaded, when the Hub can tell us
     if downloading_this:
         st.info(f"↓ {tr('Downloading model…')} · **{model}**")
     elif active_download is not None:
         st.info(f"{tr('Another model is downloading.')} · **{active_download.model}**")
     else:
-        st.info(f"↓ {tr('Download required')} · **{model}**")
+        size = download_size(engine, model, resolved_backend)
+        if size:
+            size_label = f" · {format_size(size)}"
+        st.info(f"↓ {tr('Download required')} · **{model}**{size_label}")
         if download_error:
             st.error(f"{tr('Model download failed')}: {download_error}")
     if active_download is not None:
@@ -337,7 +342,7 @@ def _model_download(engine: str, model: str, resolved_backend: str, engine_ok: b
     elif download_error:
         button_label = tr("Retry download")
     else:
-        button_label = tr("Download model")
+        button_label = tr("Download model") + size_label
     if st.button(
         f"↓ {button_label}",
         key="download_selected_model",
@@ -371,7 +376,11 @@ def _speakers(basic_mode: bool) -> tuple[bool, bool, str, dict[str, object]]:
     elif diarize and diar_cached:
         st.caption(f"✓ {tr('Ready offline')}")
     elif diarize:
-        st.caption(tr("A Hugging Face token is needed once to download the speaker model."))
+        speaker_model_size = remote_size(DIARIZATION_MODEL)
+        st.caption(
+            tr("A Hugging Face token is needed once to download the speaker model.")
+            + (f" ({format_size(speaker_model_size)})" if speaker_model_size else "")
+        )
         st.caption(
             f"[Hugging Face token](https://huggingface.co/settings/tokens) · "
             f"[Model terms](https://huggingface.co/{DIARIZATION_MODEL})"
