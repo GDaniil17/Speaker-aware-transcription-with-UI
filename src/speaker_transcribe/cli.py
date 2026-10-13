@@ -10,21 +10,24 @@ import argparse
 import sys
 from pathlib import Path
 
-from speaker_transcribe.config import (
-    ENGINES,
-    Settings,
-    describe_runtime,
-    engine_available,
-    engine_install_hint,
+from speaker_transcribe.catalog import DEFAULT_WHISPER_MODEL, ENGINES
+from speaker_transcribe.chunking import (
+    DEFAULT_CHUNK_LADDER,
+    DEFAULT_STALL_TIMEOUT,
+    format_ladder,
+    parse_ladder,
 )
+from speaker_transcribe.config import Settings
+from speaker_transcribe.engine_install import engine_install_hint
 from speaker_transcribe.export import EXPORTERS, export
 from speaker_transcribe.pipeline import run_pipeline
+from speaker_transcribe.runtime import describe_runtime, engine_available
 
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="transcribe",
-        description="Speaker-aware transcription (Whisper + pyannote diarization).",
+        description="Speaker-aware transcription (Whisper and other local ASR engines + pyannote).",
     )
     p.add_argument("--input", help="Path to an audio/video file.")
     p.add_argument("--start", type=float, default=0.0, help="Start offset (seconds).")
@@ -39,8 +42,8 @@ def build_parser() -> argparse.ArgumentParser:
         default="whisper",
         choices=list(ENGINES),
         help="ASR engine. whisper (default), parakeet (NVIDIA, 25 EU langs), "
-        "qwen3-asr (Qwen3-ASR-1.7B, 30 langs). Non-Whisper engines need an extra "
-        "install — see --list-models.",
+        "qwen3-asr (Qwen3-ASR-1.7B, 30 langs), sensevoice, gigaam (GigaAM v3/v2, Russian). "
+        "Some engines need an extra install — see --list-models.",
     )
     p.add_argument(
         "--model",
@@ -57,8 +60,13 @@ def build_parser() -> argparse.ArgumentParser:
     )
     p.add_argument(
         "--language",
-        default="ru",
-        help="Language code, or 'auto' to autodetect.",
+        default="auto",
+        help="Language code (e.g. en, ru), or 'auto' to detect it (default).",
+    )
+    p.add_argument(
+        "--no-diarize",
+        action="store_true",
+        help="Transcription only, no speaker labels (no pyannote, no HF token).",
     )
     p.add_argument("--min-speakers", type=int, default=2)
     p.add_argument("--max-speakers", type=int, default=5)
@@ -72,6 +80,39 @@ def build_parser() -> argparse.ArgumentParser:
         "--beam-size",
         default="auto",
         help="Beam size, or 'auto' (1 on CPU, 5 on GPU). Higher = slower, more accurate.",
+    )
+    p.add_argument(
+        "--stall-timeout",
+        type=float,
+        default=DEFAULT_STALL_TIMEOUT,
+        metavar="SECONDS",
+        help="Give up on a transcription that has made no progress for this many "
+        f"seconds and retry it in chunks (default: {DEFAULT_STALL_TIMEOUT:g}). "
+        "0 = never interrupt a run (no stall recovery).",
+    )
+    p.add_argument(
+        "--chunk-ladder",
+        default=format_ladder(DEFAULT_CHUNK_LADDER),
+        metavar="MINUTES",
+        help="Chunk sizes in minutes, tried in order after a stall "
+        f"(default: '{format_ladder(DEFAULT_CHUNK_LADDER)}').",
+    )
+    p.add_argument(
+        "--no-chunk-fallback",
+        action="store_true",
+        help="Never chunk: a stalled run fails instead of being retried smaller.",
+    )
+    p.add_argument(
+        "--chunk-first",
+        action="store_true",
+        help="Skip the whole-file attempt and start at the first chunk size "
+        "(for a file you already know stalls).",
+    )
+    p.add_argument(
+        "--fail-on-stall",
+        action="store_true",
+        help="Fail the run if any audio stalls at every chunk size, instead of "
+        "skipping it and keeping the rest of the transcript.",
     )
     p.add_argument(
         "--formats",
@@ -114,7 +155,9 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 2
 
-    model = args.model or next(iter(engine.models))
+    model = args.model or (
+        DEFAULT_WHISPER_MODEL if args.engine == "whisper" else next(iter(engine.models))
+    )
 
     language = None if args.language == "auto" else args.language
     if engine.languages is None:
@@ -127,6 +170,12 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 2
 
+    try:
+        ladder = parse_ladder(args.chunk_ladder)
+    except ValueError as exc:
+        print(f"Error: --chunk-ladder: {exc}", file=sys.stderr)
+        return 2
+
     settings = Settings(
         input_path=args.input,
         start=args.start,
@@ -134,17 +183,41 @@ def main(argv: list[str] | None = None) -> int:
         engine=args.engine,
         whisper_model=model,
         language=language,
+        diarize=not args.no_diarize,
         min_speakers=args.min_speakers,
         max_speakers=args.max_speakers,
         backend=args.backend,
         beam_size=None if args.beam_size == "auto" else int(args.beam_size),
+        stall_timeout=args.stall_timeout,
+        chunk_fallback=not args.no_chunk_fallback,
+        chunk_ladder=ladder,
+        try_whole_file_first=not args.chunk_first,
+        skip_failed_chunks=not args.fail_on_stall,
     )
     print(
         f"Backend: {describe_runtime(settings.backend, settings.device, settings.compute_type)}"
         f", beam size {settings.beam_size}"
-        f" | Diarization: pyannote · {settings.diarization_device}",
+        + (
+            f" | Diarization: pyannote · {settings.diarization_device}"
+            if settings.diarize
+            else " | Diarization: off"
+        ),
         file=sys.stderr,
     )
+    if settings.stall_timeout > 0 and settings.chunk_fallback and settings.chunk_ladder:
+        print(
+            f"Stall recovery: after {settings.stall_timeout:g}s without progress, "
+            f"retry in {format_ladder(settings.chunk_ladder)} min chunks",
+            file=sys.stderr,
+        )
+    elif settings.stall_timeout > 0:
+        print(
+            f"Stall recovery: fail after {settings.stall_timeout:g}s without progress "
+            "(chunk fallback off)",
+            file=sys.stderr,
+        )
+    else:
+        print("Stall recovery: off (--stall-timeout 0)", file=sys.stderr)
 
     segments = run_pipeline(settings, progress=lambda m: print(m, file=sys.stderr))
     if not segments:

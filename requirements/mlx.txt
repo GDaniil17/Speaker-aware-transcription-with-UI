@@ -1,0 +1,10 @@
+# Whisper on the Apple Silicon GPU. run.sh adds mlx-whisper itself with
+# --no-deps: its torch requirement (~500 MB) is only used to convert PyTorch
+# checkpoints, never to transcribe. These are the packages it imports at runtime.
+-r ui.txt
+mlx>=0.11
+numba
+scipy
+tiktoken
+tqdm
+more-itertools

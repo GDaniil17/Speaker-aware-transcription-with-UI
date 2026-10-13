@@ -1,0 +1,44 @@
+* { box-sizing: border-box; }
+body { margin:0; font-family: system-ui, -apple-system, sans-serif;
+       color:#e6e6e6; background:transparent; }
+#stage { position:relative; }
+#player { max-height:46vh !important; }
+#caption { position:absolute; left:0; right:0; bottom:52px; text-align:center;
+           pointer-events:none; padding:0 8%; }
+#caption span { background:rgba(0,0,0,.72); color:#fff; padding:4px 10px;
+                border-radius:6px; font-size:1.15rem; line-height:1.7;
+                box-decoration-break:clone; -webkit-box-decoration-break:clone; }
+#speakers { display:flex; flex-wrap:wrap; gap:8px; align-items:center;
+            margin:12px 0 8px; }
+#speakers > .lbl { opacity:.7; font-size:.85rem; }
+.spkchip { display:flex; align-items:center; gap:6px; padding:3px 6px;
+           border:1px solid rgba(128,128,128,.3); border-radius:8px; }
+.spkchip input[type=color] { width:22px; height:22px; border:none; background:none;
+                             padding:0; cursor:pointer; }
+.spkchip input[type=text] { background:transparent; border:none; color:inherit;
+                            font:inherit; font-weight:700; width:10ch; }
+.spkchip input[type=text]:focus { outline:1px solid rgba(128,128,128,.5);
+                                   border-radius:4px; }
+#addspk { cursor:pointer; padding:3px 8px; border:1px dashed rgba(128,128,128,.5);
+          border-radius:8px; background:none; color:inherit; font:inherit; }
+#transcript { max-height:300px; overflow-y:auto;
+              border:1px solid rgba(128,128,128,.3); border-radius:8px; padding:6px; }
+.line { display:flex; gap:8px; padding:3px 6px; border-radius:6px;
+        align-items:flex-start; }
+.line:hover { background:rgba(128,128,128,.12); }
+.line.active { background:rgba(255,214,10,.22); }
+.ts { font-family: ui-monospace, monospace; font-size:.82rem; opacity:.75;
+      white-space:nowrap; padding-top:3px; cursor:pointer;
+      text-decoration:underline dotted; }
+.ts:hover { opacity:1; color:#ffd60a; }
+.spk { font:inherit; font-size:.78rem; font-weight:700; border:none;
+       border-radius:6px; padding:2px 4px; cursor:pointer; color:#fff;
+       max-width:15ch; }
+.tx { flex:1; padding-top:2px; }
+#exports { display:flex; gap:8px; margin-top:12px; align-items:center; }
+#exports label { display:flex; align-items:center; gap:4px; cursor:pointer;
+                 font-size:.85rem; opacity:.85; margin-right:4px; }
+#exports button { cursor:pointer; padding:6px 12px; font:inherit;
+                  border:1px solid rgba(128,128,128,.4); border-radius:8px;
+                  background:rgba(128,128,128,.12); color:inherit; }
+#exports button:hover { background:rgba(128,128,128,.25); }

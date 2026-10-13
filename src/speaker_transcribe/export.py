@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from collections.abc import Sequence
 
-from speaker_transcribe.pipeline import TranscriptSegment
+from speaker_transcribe.transcript import TranscriptSegment
 
 
 def _ts(t: float, sep: str = ",") -> str:

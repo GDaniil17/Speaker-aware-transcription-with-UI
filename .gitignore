@@ -5,6 +5,9 @@
 __pycache__/
 *.py[cod]
 .venv/
+.venv-whisper/
+dist/
+build/
 *.egg-info/
 .pytest_cache/
 .ruff_cache/
@@ -14,7 +17,8 @@ __pycache__/
 models/
 hf_cache/
 
-# Generated transcripts
+# Your recordings (Docker mounts ./data at /data) and generated transcripts
+data/
 *.srt
 *.vtt
 out/

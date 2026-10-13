@@ -1,8 +1,12 @@
 [server]
 maxUploadSize = 4096
+# Media over 150 MB is previewed from ./static (app/static/...); without this the
+# player gets the app's HTML page instead of the video and stays empty.
 enableStaticServing = true
 headless = true
-address = "0.0.0.0"
+# Local only: the page can hold transcripts and media. Docker sets
+# STREAMLIT_SERVER_ADDRESS=0.0.0.0, which takes precedence over this file.
+address = "127.0.0.1"
 port = 8501
 
 [browser]

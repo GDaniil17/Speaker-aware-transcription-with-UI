@@ -1,0 +1,3 @@
+# Whisper via faster-whisper (CPU): Linux, Windows, Intel Macs, macOS < 14, or --cpu.
+-r ui.txt
+faster-whisper>=1.1.0

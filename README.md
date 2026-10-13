@@ -1,304 +1,274 @@
-# Speaker Transcribe
+# 🎙️ Speaker Transcribe
 
-Local transcription with speaker labels.
+**English** · [Русский](README.ru.md)
 
-Speaker Transcribe uses Whisper (or an alternative local ASR engine) for
-speech-to-text and pyannote.audio for speaker diarization. It can process audio
-or video files and export transcripts as text, JSON, SRT, or VTT.
+[![License: MIT](docs/badges/license.svg)](LICENSE) ![Python 3.11 | 3.12](docs/badges/python.svg) ![Platforms: macOS, Linux, Windows](docs/badges/platforms.svg) ![Runs 100% locally](docs/badges/local.svg)
 
-## What It Does
+Turn interviews, meetings and podcasts into text that says **who said what**, on your
+own computer. Recordings never leave your machine: no cloud API, no account.
 
-- Transcribes audio and video files.
-- Detects speakers and groups transcript lines by speaker.
-- Lets you process the whole file, the first N seconds, or a time range.
-- Runs from a Streamlit UI or the `transcribe` CLI.
-- Exports `.txt`, `.json`, `.srt`, and `.vtt`.
-- Runs locally. Audio is not sent to an external transcription API.
+Whisper (or another local speech-recognition engine) writes the text, and
+[pyannote](https://github.com/pyannote/pyannote-audio) figures out the speakers. You
+check the result next to the video, fix names or lines, and download TXT, SRT, VTT or
+JSON.
 
-## Requirements
+![Transcript editor: video with captions, speaker-labelled lines and export buttons](docs/screenshots/transcript-editor.png)
 
-- Python 3.11 or 3.12
-- [uv](https://docs.astral.sh/uv/)
-- ffmpeg
-- HuggingFace token for diarization
+## Features
 
-For diarization, create a HuggingFace token and accept the pyannote model terms:
+- **Runs locally.** Audio and video stay on your machine; telemetry is off.
+- **Speaker labels.** Every line is assigned to a speaker; rename speakers, recolour
+  them or reassign a line in the editor.
+- **Interactive transcript.** Click a timestamp to jump there; the video shows live
+  captions; edit any line in place.
+- **Subtitles and data.** Export `.txt`, `.srt`, `.vtt` or `.json`, with or without
+  speaker names.
+- **Five engines.** Whisper (99 languages), NVIDIA Parakeet, Qwen3-ASR, SenseVoice and
+  GigaAM v3 / v2 for Russian.
+- **Uses your hardware.** Apple Silicon GPU via MLX, NVIDIA GPUs via CUDA, or the CPU.
+- **Long recordings.** Process a whole file, the first N seconds or a time range; a
+  run that gets stuck is retried in smaller chunks automatically.
+- **English and Russian interface**, plus a `transcribe` command for scripts.
 
-- https://huggingface.co/settings/tokens
-- https://huggingface.co/pyannote/speaker-diarization-community-1
+## Quick start: one command
 
-Create `.env`:
+You need an internet connection the first time. Nothing has to be installed
+beforehand: the launcher fetches [uv](https://docs.astral.sh/uv/) and Python 3.12
+into the project folder. It doesn't need administrator rights and doesn't touch the
+rest of your system.
 
-```bash
-cp .env.example .env
-```
-
-Then set:
-
-```bash
-HF_TOKEN=hf_...
-```
-
-If ffmpeg is missing:
+**macOS / Linux**: open Terminal and paste:
 
 ```bash
-brew install ffmpeg
+git clone https://github.com/GDaniil17/Speaker-aware-transcription-with-UI.git && cd Speaker-aware-transcription-with-UI && ./run.sh
 ```
 
-Docker installs ffmpeg inside the image.
+**Windows**: open PowerShell and paste:
 
-## Quick Start
-
-```bash
-make run
+```powershell
+git clone https://github.com/GDaniil17/Speaker-aware-transcription-with-UI.git; cd Speaker-aware-transcription-with-UI; .\run.bat
 ```
 
-Open:
+The app opens in your browser at <http://127.0.0.1:8501>. Stop it with **Ctrl+C**
+in the terminal; start it again later with the same `./run.sh` or `run.bat`.
+
+<details>
+<summary><b>No git?</b> Download the ZIP instead</summary>
+
+1. On GitHub, click **Code → Download ZIP** and unzip it.
+2. **Windows:** open the folder and double-click **`run.bat`**.
+   If SmartScreen warns about it, choose **More info → Run anyway**.
+3. **macOS:** open Terminal, type `cd ` (with a space), drag the unzipped folder into
+   the Terminal window, press Enter, then run `bash run.sh`.
+4. **Linux:** open a terminal in the folder and run `bash run.sh`.
+
+</details>
+
+What you'll see in the terminal:
 
 ```text
-http://localhost:8501
+$ ./run.sh
+Preparing Python 3.12 and the Whisper environment…
+Installing Apple Silicon GPU support (MLX)…
+Starting Whisper large-v3-turbo (mlx). No Hugging Face token needed.
+Open http://127.0.0.1:8501 if the browser does not open. Stop with Ctrl+C.
+The model downloads on your first transcription; keep this terminal open.
 ```
 
-In the UI:
+### Two ways to run
 
-1. Choose a Whisper model.
-2. Choose a language, or use auto-detect.
-3. Choose whole file or a fragment.
-4. Upload a file or enter a local path.
-5. Click `Transcribe`.
-6. Download the formats you need.
+| | `./run.sh` / `run.bat` (quick start) | `./run.sh --full` / `run.bat --full` |
+| --- | --- | --- |
+| Transcription | Whisper | Whisper, Parakeet, Qwen3-ASR, SenseVoice, GigaAM |
+| Speaker identification | — (you can still assign speakers by hand) | ✓ pyannote |
+| Hugging Face account | not needed | free token, needed once |
+| Disk space | under 1 GB + the model (~1.6 GB for `large-v3-turbo`) | a few GB (PyTorch) + models |
+| Environment | `.venv-whisper/` | `.venv/` (also gives you the `transcribe` CLI) |
 
-Use `small` for quick tests. Use `large-v3` or `large-v3-turbo` for better final output.
+The quick start picks the fastest backend it can: the **Apple Silicon GPU (MLX)** on
+M-series Macs with macOS 14+, otherwise the CPU via faster-whisper. Add `--cpu` to
+force the CPU on a Mac. The full mode uses an NVIDIA GPU when PyTorch sees one.
 
-## CLI
+### Turning on speaker identification
 
-Process the first 60 seconds:
+The speaker model ([pyannote/speaker-diarization-community-1](https://huggingface.co/pyannote/speaker-diarization-community-1))
+is free, but Hugging Face asks you to accept its terms before the first download:
+
+1. Create a free account and a **read** token at <https://huggingface.co/settings/tokens>.
+2. Open the [model page](https://huggingface.co/pyannote/speaker-diarization-community-1)
+   and accept the conditions.
+3. Start with `./run.sh --full` (or `run.bat --full`), then paste the token into
+   **Settings → Hugging Face token**. You can also put it in `.env` as
+   `HF_TOKEN=hf_...` so you don't have to paste it every time.
+
+You only need the token once. After the first run the model is cached in
+`~/.cache/huggingface` and works offline, and the token is never sent to the browser.
+
+## Using the app
+
+<img src="docs/screenshots/settings-sidebar.png" alt="Settings sidebar with engine, model, language, speaker options and the model guide" width="260" align="right">
+
+1. **Pick an engine and a model** in the sidebar. Whisper `large-v3-turbo` is a good
+   default. Click **Download model** the first time; the progress bar survives a page
+   refresh.
+2. **Choose the recording language**, or leave **Auto-detect** on.
+3. **Identify speakers** (full mode): optionally set the minimum and maximum number
+   of people.
+4. **Add a recording**: upload a file (up to 4 GB) or type a path on this computer.
+   Audio and video both work: MP3, WAV, M4A, FLAC, OGG, AAC, MP4, MOV, MKV, WEBM, AVI.
+5. **Optional:** under **Audio range**, transcribe only the first N seconds or a time
+   range. That makes for a quick test of a long file.
+6. Click **Transcribe**. Each step shows its own timer.
+7. **Review and export**: click a timestamp to jump there, rename speakers, fix
+   lines, then download the format you need.
+
+**Which model should I choose?** in the sidebar recommends engines for the hardware
+it detects, and lists every language each engine supports. The **EN/RU** switch next
+to *Settings* changes the interface language only, not the recording language.
+
+<br clear="right">
+
+## Engines and models
+
+| Engine | Model | Languages | Install (full mode) |
+| --- | --- | --- | --- |
+| **Whisper** | `tiny` … `large-v3`, `large-v3-turbo`, `distil-*` | 99, multilingual | included |
+| **Parakeet** (NVIDIA) | `parakeet-tdt-0.6b-v3` | 25 European, auto-detected | `uv sync --inexact --extra parakeet` (Apple Silicon: `--extra parakeet-mlx`) |
+| **Qwen3-ASR** | `Qwen3-ASR-1.7B` + forced aligner | 30 | `uv sync --inexact --extra qwen3-asr` |
+| **SenseVoice** | `SenseVoiceSmall` | Chinese, Cantonese, English, Japanese, Korean | `uv sync --inexact --extra sensevoice` |
+| **GigaAM v3** (Sber) | `gigaam-v3-e2e-rnnt`, `gigaam-v3-e2e-ctc`, `gigaam-v3-rnnt`, `gigaam-v3-ctc` | Russian | included |
+| **GigaAM v2** (Sber) | `gigaam-v2-rnnt`, `gigaam-v2-ctc` | Russian | included |
+
+In full mode, the sidebar offers an **Install engine** button for missing engines.
+On macOS/Linux, `make install-all` installs every engine at once. Optional engines
+pull heavy, version-pinned dependencies; if they conflict, install one engine at a
+time.
+
+| Your hardware | Good picks |
+| --- | --- |
+| **Apple Silicon** | Whisper `large-v3-turbo` (MLX GPU), Parakeet (MLX), SenseVoice, GigaAM for Russian |
+| **NVIDIA GPU** | Whisper `large-v3` / `large-v3-turbo`, Parakeet, Qwen3-ASR |
+| **CPU only** | Whisper `small` / `medium`, `distil-*` for English, SenseVoice, GigaAM for Russian |
+
+Notes:
+
+- **Speed:** on an M-series Mac, Whisper `large-v3-turbo` handles an hour of audio in
+  a few minutes. On an older CPU, try `small` first.
+- **Parakeet** detects the language itself, so the language selector is disabled.
+- **GigaAM**: after picking the engine, choose **GigaAM version** (v3 or v2), then
+  the model. The default, `gigaam-v3-e2e-rnnt`, writes punctuation, capitals and
+  digits ("15 марта в 10:00"). The other v3 models and both v2 models write lowercase
+  words without punctuation. `*-ctc` variants are a little faster than `*-rnnt`.
+  All of them run on the CPU through ONNX and are very fast; each model is
+  ~225 MB.
+- **Licences:** each model has its own licence; check the model page before
+  commercial use.
+
+## Command line
+
+Available after `./run.sh --full` (or `uv sync`):
 
 ```bash
-uv run transcribe \
-  --input sample-interview.mp3 \
-  --duration 60 \
-  --model small \
-  --language auto \
-  --formats txt srt
+uv run transcribe --input interview.mp3                     # whole file → interview.txt + .srt
+uv run transcribe --input meeting.mp4 --start 120 --duration 90 --formats txt json srt vtt
+uv run transcribe --input lecture.m4a --language en --no-diarize --out-dir transcripts
+uv run transcribe --engine gigaam --input call.wav           # GigaAM v3 e2e (default)
+uv run transcribe --engine gigaam --model gigaam-v2-rnnt --input call.wav
+uv run transcribe --list-models                             # engines, models, install hints
 ```
 
-Process a specific range:
-
-```bash
-uv run transcribe \
-  --input sample-meeting.mp4 \
-  --start 120 \
-  --duration 90 \
-  --language auto \
-  --formats txt json srt vtt
-```
-
-Write output files to a custom directory:
-
-```bash
-uv run transcribe \
-  --input sample-meeting.mp4 \
-  --out-dir outputs \
-  --formats txt json
-```
-
-List available Whisper models:
-
-```bash
-uv run transcribe --list-models
-```
+`--help` lists every option, including decoder settings and stall recovery.
 
 ## Docker
 
 ```bash
-make docker-up
+docker compose up --build        # or: make docker-up
 ```
 
-Open:
+Then open <http://localhost:8501>. Put recordings in `./data` and refer to them as
+`/data/<file>` in the app. Models are cached in `./hf_cache`, and `HF_TOKEN` is read
+from your shell or `.env`. The image runs on the CPU.
 
-```text
-http://localhost:8501
-```
+## Long recordings and stall recovery
 
-Docker notes:
+Sometimes a long file gets stuck: the engine loops on a repetitive stretch, or one
+huge decode never returns. When a run makes no progress for 10 minutes, it is stopped
+and the audio is retried in 5-, then 2-, then 1-minute chunks. Change this under
+**Advanced settings → Recovery for long files**, or with `--stall-timeout`,
+`--chunk-ladder "5, 2, 1"`, `--chunk-first` and `--fail-on-stall` in the CLI.
+Speaker identification always runs over the whole file, so speaker labels stay
+consistent across chunks.
 
-- `HF_TOKEN` is read from your shell or `.env`.
-- Model downloads are cached in `./hf_cache`.
-- Put files in `./data` when using local paths inside Docker.
-- In Docker, refer to those files as `/data/file.mp3`.
+## Privacy
 
-## Models And Backends
-
-Backend selection:
-
-- `auto`: MLX on Apple Silicon, otherwise faster-whisper.
-- `mlx`: Apple Silicon GPU backend.
-- `faster-whisper`: CUDA if available, otherwise CPU.
-
-Useful models:
-
-| Model | Best for |
-| --- | --- |
-| `small` | Fast tests |
-| `medium` | Better quality without huge runtime |
-| `large-v3` | Best quality, slow on CPU |
-| `large-v3-turbo` / `turbo` | Near-large quality, faster |
-| `distil-*` / `*.en` | English-only, faster |
-
-## Other ASR Engines
-
-Besides Whisper, you can transcribe with other local models. They all run
-locally, produce timestamps, and work with diarization. Pick the engine in the
-sidebar (UI) or with `--engine` (CLI). Each needs its own optional install:
-
-| Engine | Model | Languages | Install |
-| --- | --- | --- | --- |
-| `whisper` | Whisper (multiple sizes) | ~99, multilingual | included |
-| `parakeet` | `parakeet-tdt-0.6b-v3` (NVIDIA) | 25 European, auto-detected | `make install-parakeet` (or `make install-parakeet-mlx` on Apple Silicon) |
-| `qwen3-asr` | `Qwen3-ASR-1.7B` (Qwen) | 30, timestamps via forced aligner | `make install-qwen3-asr` |
-| `sensevoice` | `SenseVoiceSmall` (FunAudioLLM) | 5 (zh, yue, en, ja, ko) | `make install-sensevoice` |
-
-Notes:
-
-- Parakeet auto-detects the language; the language selector is disabled for it.
-- On Apple Silicon, Parakeet uses the MLX backend (`parakeet-mlx`); elsewhere it
-  uses NeMo.
-- Qwen3-ASR also downloads `Qwen3-ForcedAligner-0.6B` to produce timestamps.
-- SenseVoice also downloads an `fsmn-vad` model for segmenting long audio.
-- These engines pull heavy, version-pinned dependencies that can conflict with
-  each other or with the pinned torch/pyannote — if resolution fails, install the
-  engine in a dedicated virtual environment.
-
-Install and run every engine at once:
-
-```bash
-make install-all   # install all engines (one uv sync)
-make run-all       # install all engines, then launch the UI
-```
-
-`make run-all` puts the engines and the launch into a single `uv sync` —
-installing separately and then running `make run` would re-sync without the
-extras and remove them. To run with a specific subset instead, pass `EXTRAS`:
-
-```bash
-make run EXTRAS="parakeet-mlx qwen3-asr sensevoice"
-```
-
-Both auto-pick the `parakeet-mlx` backend on Apple Silicon and `parakeet` (NeMo)
-elsewhere. If the combined install fails to resolve, install one engine per venv.
-
-### Choosing a Model for Your Hardware
-
-The UI shows a hardware-aware **"Which engine & model should I use?"** panel in the
-sidebar (it auto-detects your device). The same guidance:
-
-| Hardware | Recommended picks | Why |
-| --- | --- | --- |
-| **NVIDIA GPU (CUDA)** | Whisper `large-v3` / `large-v3-turbo`; Parakeet; Qwen3-ASR | float16 keeps large models fast; Qwen3-ASR gives top accuracy when you have VRAM. |
-| **Apple Silicon (MLX / MPS)** | Whisper `large-v3-turbo` (MLX); Parakeet (MLX); SenseVoice | MLX runs on the Apple GPU; `parakeet-mlx` avoids heavy NeMo. |
-| **CPU only** | Whisper `small` / `medium`; `distil-*` for English; SenseVoice | int8 keeps it usable; avoid `large-v3` (slow) and GPU-hungry Qwen3-ASR. |
-
-Language support by engine:
-
-| Engine | Languages |
-| --- | --- |
-| `whisper` | 99 languages (multilingual); `distil-*` variants are English-only |
-| `parakeet` | 25 European languages, auto-detected |
-| `qwen3-asr` | 30 languages |
-| `sensevoice` | 5 languages: Chinese, Cantonese, English, Japanese, Korean |
-
-Rule of thumb: Whisper for the widest language coverage, Parakeet for fast
-European-language audio, Qwen3-ASR for top accuracy on a GPU, and SenseVoice when
-your audio is Chinese/Cantonese/English/Japanese/Korean.
-
-List engines and their models:
-
-```bash
-uv run transcribe --list-models
-```
-
-Transcribe with an alternative engine:
-
-```bash
-uv run transcribe --engine parakeet --input sample.mp3 --duration 60
-uv run transcribe --engine qwen3-asr --language en --input sample.mp3 --duration 60
-```
-
-## Output Files
-
-The CLI writes files next to the input unless `--out-dir` is set.
-
-Supported formats:
-
-- `txt`: readable transcript
-- `json`: structured segments
-- `srt`: subtitles
-- `vtt`: web subtitles
-
-## Development
-
-```bash
-make test
-make lint
-make check
-```
-
-Direct commands:
-
-```bash
-uv run pytest
-uv run ruff check .
-uv run ruff format .
-```
-
-## Project Layout
-
-```text
-app.py                       Streamlit UI
-src/speaker_transcribe/
-  audio.py                   audio extraction and fragment handling
-  cli.py                     transcribe command
-  config.py                  settings, models, device detection
-  export.py                  txt/json/srt/vtt exporters
-  pipeline.py                ASR engines (Whisper/Parakeet/Qwen3) + pyannote pipeline
-tests/                       unit tests
-```
-
-## Screenshots
-
-<p>
-  <img src="docs/screenshots/ui-desktop.png" alt="Speaker Transcribe desktop UI with settings sidebar and upload workflow" width="100%">
-</p>
-
-<p>
-  <img src="docs/screenshots/processed-file.png" alt="Processed Movie.mp4 with transcript, video preview, and speaker-labeled lines" width="100%">
-</p>
-
-<p>
-  <img src="docs/screenshots/speaker-editor.png" alt="Speaker editor with renamed speaker label and editable speaker controls" width="100%">
-</p>
+Everything runs locally. The app listens on `127.0.0.1` only (Docker excepted), and
+the temporary copy of an upload is deleted once it has been processed. pyannote's usage metrics are turned off
+(`PYANNOTE_METRICS_ENABLED=false`), as are Streamlit's usage statistics. The network
+is used only to download the launcher tools, Python packages and models.
 
 ## Troubleshooting
 
-`HF_TOKEN` errors:
+<details>
+<summary><b>macOS: "permission denied" or "cannot be opened"</b></summary>
 
-- Check `.env`.
-- Accept the pyannote model terms on HuggingFace.
+Run `bash run.sh` instead of `./run.sh`. The ZIP download drops the executable bit.
+</details>
 
-Slow transcription:
+<details>
+<summary><b>Windows: "running scripts is disabled on this system"</b></summary>
 
-- Use `small` or `medium` while testing.
-- Use a fragment with `--duration`.
-- Avoid `large-v3` on CPU for quick runs.
+Start the app with `run.bat`, not `run.ps1`. The batch file allows the script for that
+one run without changing your system settings.
+</details>
 
-No speaker labels:
+<details>
+<summary><b>Speaker identification: "token required" or "403"</b></summary>
 
-- Make sure diarization is enabled.
-- Check that `HF_TOKEN` is valid.
-- Set realistic `--min-speakers` and `--max-speakers`.
+Accept the conditions on the [model page](https://huggingface.co/pyannote/speaker-diarization-community-1)
+with the same account the token belongs to, then try again. You only need the token
+for the first download.
+</details>
 
-Docker local paths do not work:
+<details>
+<summary><b>The GPU is not used</b></summary>
 
-- Put files in `./data`.
-- Use `/data/<filename>` in the app.
+- **Mac:** MLX needs Apple Silicon and macOS 14+. Run Terminal natively, not under
+  Rosetta. If the GPU fails mid-run, restart with `./run.sh --cpu`.
+- **NVIDIA:** use `--full`. faster-whisper also needs the CUDA 12 cuBLAS and cuDNN 9
+  libraries; see the [faster-whisper docs](https://github.com/SYSTRAN/faster-whisper#gpu).
+</details>
+
+<details>
+<summary><b>Slow or running out of memory</b></summary>
+
+Choose a smaller model (`small`, `base`), test with **Audio range → First N seconds**,
+or turn off speaker identification.
+</details>
+
+<details>
+<summary><b>Port 8501 is busy</b></summary>
+
+The launchers pick the next free port (8502, 8503, …) and print the address.
+</details>
+
+## Contributing
+
+Contributions are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) covers the dev setup,
+the code layout and how to add an engine or a translation.
+
+## Acknowledgements
+
+Built on [Whisper](https://github.com/openai/whisper),
+[faster-whisper](https://github.com/SYSTRAN/faster-whisper),
+[mlx-whisper](https://github.com/ml-explore/mlx-examples/tree/main/whisper),
+[pyannote.audio](https://github.com/pyannote/pyannote-audio),
+[NVIDIA NeMo / Parakeet](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3),
+[Qwen3-ASR](https://huggingface.co/Qwen/Qwen3-ASR-1.7B),
+[SenseVoice](https://github.com/FunAudioLLM/SenseVoice),
+[GigaAM](https://github.com/salute-developers/GigaAM) via
+[onnx-asr](https://github.com/istupakov/onnx-asr),
+[Streamlit](https://streamlit.io) and [uv](https://github.com/astral-sh/uv).
+
+## License
+
+[MIT](LICENSE). The models are downloaded separately and keep their own licences.

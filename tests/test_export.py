@@ -1,5 +1,5 @@
 from speaker_transcribe.export import export, to_json, to_srt, to_txt, to_vtt
-from speaker_transcribe.pipeline import TranscriptSegment
+from speaker_transcribe.transcript import TranscriptSegment
 
 SEGMENTS = [
     TranscriptSegment(0.0, 2.5, "Speaker 1", "Hello there."),

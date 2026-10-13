@@ -14,3 +14,9 @@ static
 *.wav
 *.mkv
 .DS_Store
+.venv-whisper
+.cache
+.github
+docs
+tests
+data

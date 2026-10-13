@@ -1,0 +1,7 @@
+# Shared by both quick-start setups (run.sh, run.ps1): the Streamlit UI and model downloads.
+# Speaker diarization and other ASR engines come from the full project setup.
+numpy>=1.26
+streamlit>=1.36
+python-dotenv>=1.0
+imageio-ffmpeg>=0.5
+huggingface-hub>=0.23

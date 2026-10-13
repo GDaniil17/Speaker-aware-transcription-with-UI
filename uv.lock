@@ -1,5 +1,5 @@
 version = 1
-revision = 2
+revision = 3
 requires-python = ">=3.11, <3.13"
 resolution-markers = [
     "python_full_version >= '3.12' and sys_platform == 'win32'",
@@ -2605,6 +2605,26 @@ wheels = [
 ]
 
 [[package]]
+name = "onnx-asr"
+version = "0.12.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/4c/11/136f556cda02ecc172674dcea79232e9e84e74b951bbcd2e2722117f633b/onnx_asr-0.12.0.tar.gz", hash = "sha256:c1fcacddbced392f9f769ed5c6223f4ce739a6e4549346de33b9b520d4ead713", size = 45991, upload-time = "2026-07-15T00:09:58.852Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/6a/60/2fa469a2ee674c35ab48821a1039762ae7b9d0b88188ac1012e779477f76/onnx_asr-0.12.0-py3-none-any.whl", hash = "sha256:5e7ceca454609819ea7833f61e2302e0c8f6ece4f8a78b66c5daba53cb51de4a", size = 3980006, upload-time = "2026-07-15T00:09:57.322Z" },
+]
+
+[package.optional-dependencies]
+cpu = [
+    { name = "onnxruntime" },
+]
+hub = [
+    { name = "huggingface-hub" },
+]
+
+[[package]]
 name = "onnxruntime"
 version = "1.27.0"
 source = { registry = "https://pypi.org/simple" }
@@ -4115,6 +4135,7 @@ dependencies = [
     { name = "imageio-ffmpeg" },
     { name = "mlx-whisper", marker = "platform_machine == 'arm64' and sys_platform == 'darwin'" },
     { name = "numpy" },
+    { name = "onnx-asr", extra = ["cpu", "hub"] },
     { name = "onnxruntime" },
     { name = "pyannote-audio" },
     { name = "pyannote-core" },
@@ -4153,6 +4174,7 @@ requires-dist = [
     { name = "mlx-whisper", marker = "platform_machine == 'arm64' and sys_platform == 'darwin'", specifier = ">=0.4" },
     { name = "nemo-toolkit", extras = ["asr"], marker = "extra == 'parakeet'", specifier = ">=2.0" },
     { name = "numpy", specifier = ">=1.26" },
+    { name = "onnx-asr", extras = ["cpu", "hub"], specifier = ">=0.12" },
     { name = "onnxruntime", specifier = ">=1.17" },
     { name = "parakeet-mlx", marker = "platform_machine == 'arm64' and sys_platform == 'darwin' and extra == 'parakeet-mlx'", specifier = ">=0.3" },
     { name = "pyannote-audio", specifier = "==4.0.4" },

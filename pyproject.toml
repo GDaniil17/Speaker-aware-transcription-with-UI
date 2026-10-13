@@ -1,9 +1,24 @@
 [project]
 name = "speaker-transcribe"
 version = "0.1.0"
-description = "Local speaker-aware transcription (Whisper + pyannote diarization) with a Streamlit UI."
+description = "Local speaker-aware transcription (Whisper and other ASR engines + pyannote diarization) with a Streamlit UI."
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "GDaniil17" }]
 requires-python = ">=3.11,<3.13"
+keywords = ["transcription", "speech-to-text", "whisper", "diarization", "pyannote", "streamlit", "subtitles"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Web Environment",
+    "Intended Audience :: End Users/Desktop",
+    "Operating System :: MacOS",
+    "Operating System :: Microsoft :: Windows",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Multimedia :: Sound/Audio :: Speech",
+]
 dependencies = [
     "faster-whisper>=1.1.0",
     "pyannote.audio==4.0.4",
@@ -12,6 +27,8 @@ dependencies = [
     "torch>=2.2",
     "torchaudio>=2.2",
     "onnxruntime>=1.17",
+    # GigaAM v2 (Russian ASR) on ONNX Runtime; light, so not an optional extra.
+    "onnx-asr[cpu,hub]>=0.12",
     "numpy>=1.26",
     "streamlit>=1.36",
     "python-dotenv>=1.0",
@@ -30,6 +47,10 @@ parakeet-mlx = [
 qwen3-asr = ["qwen-asr"]
 sensevoice = ["funasr>=1.1"]
 
+[project.urls]
+Homepage = "https://github.com/GDaniil17/Speaker-aware-transcription-with-UI"
+Issues = "https://github.com/GDaniil17/Speaker-aware-transcription-with-UI/issues"
+
 [project.scripts]
 transcribe = "speaker_transcribe.cli:main"
 
@@ -40,7 +61,7 @@ dev = [
 ]
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling>=1.27"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
@@ -50,14 +71,11 @@ packages = ["src/speaker_transcribe"]
 line-length = 100
 target-version = "py311"
 src = ["src", "tests"]
-extend-exclude = ["code_from_notebook_base.py"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "W", "C4", "SIM"]
 ignore = ["B904"]
 
-[tool.ruff.lint.per-file-ignores]
-"code_from_notebook_base.py" = ["ALL"]
-
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["src"]
